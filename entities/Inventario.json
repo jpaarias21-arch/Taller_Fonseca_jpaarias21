@@ -1,0 +1,78 @@
+{
+  "name": "Inventario",
+  "type": "object",
+  "properties": {
+    "nombre": {
+      "type": "string",
+      "title": "Nombre del Producto"
+    },
+    "codigo": {
+      "type": "string",
+      "title": "C\u00f3digo"
+    },
+    "tipo": {
+      "type": "string",
+      "title": "Tipo",
+      "enum": [
+        "Repuesto F\u00edsico",
+        "Consumible Qu\u00edmico"
+      ],
+      "default": "Consumible Qu\u00edmico"
+    },
+    "categoria": {
+      "type": "string",
+      "title": "Categor\u00eda",
+      "enum": [
+        "Pintura",
+        "Lija",
+        "Transparente",
+        "Masilla",
+        "Primer",
+        "Thinner",
+        "Repuesto Mec\u00e1nico",
+        "Herramienta",
+        "Otro"
+      ]
+    },
+    "unidad": {
+      "type": "string",
+      "title": "Unidad",
+      "enum": [
+        "Litro",
+        "Gal\u00f3n",
+        "Unidad",
+        "Kilo",
+        "Metro",
+        "Caja"
+      ]
+    },
+    "stock_actual": {
+      "type": "number",
+      "title": "Stock Actual",
+      "default": 0
+    },
+    "stock_minimo": {
+      "type": "number",
+      "title": "Stock M\u00ednimo",
+      "default": 0
+    },
+    "precio_unitario": {
+      "type": "number",
+      "title": "Precio Unitario",
+      "default": 0
+    },
+    "proveedor": {
+      "type": "string",
+      "title": "Proveedor"
+    },
+    "notas": {
+      "type": "string",
+      "title": "Notas"
+    }
+  },
+  "required": [
+    "nombre",
+    "tipo",
+    "unidad"
+  ]
+}

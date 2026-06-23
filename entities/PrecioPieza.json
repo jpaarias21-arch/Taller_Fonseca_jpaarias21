@@ -1,0 +1,51 @@
+{
+  "name": "PrecioPieza",
+  "type": "object",
+  "properties": {
+    "pieza_id": {
+      "type": "string",
+      "title": "Pieza ID (del cat\u00e1logo)"
+    },
+    "pieza_nombre": {
+      "type": "string",
+      "title": "Nombre de la Pieza"
+    },
+    "pieza_categoria": {
+      "type": "string",
+      "title": "Categor\u00eda"
+    },
+    "precio_base": {
+      "type": "number",
+      "title": "Precio Base ($)",
+      "default": 0
+    },
+    "margen_porcentaje": {
+      "type": "number",
+      "title": "Margen (%)",
+      "default": 0
+    },
+    "precio_final": {
+      "type": "number",
+      "title": "Precio Final ($)",
+      "default": 0
+    },
+    "precio_hora_dm": {
+      "type": "number",
+      "title": "Precio por Hora D&M ($)",
+      "default": 0
+    },
+    "precio_hora_reparacion": {
+      "type": "number",
+      "title": "Precio por Hora Reparaci\u00f3n ($)",
+      "default": 0
+    },
+    "notas": {
+      "type": "string",
+      "title": "Notas"
+    }
+  },
+  "required": [
+    "pieza_id",
+    "pieza_nombre"
+  ]
+}

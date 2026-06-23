@@ -1,0 +1,82 @@
+{
+  "name": "RequerimientoCompra",
+  "type": "object",
+  "properties": {
+    "orden_id": {
+      "type": "string",
+      "title": "Orden de Trabajo ID"
+    },
+    "numero_orden": {
+      "type": "string",
+      "title": "N\u00famero de Orden"
+    },
+    "linea_avaluo_id": {
+      "type": "string",
+      "title": "L\u00ednea de Aval\u00fao ID"
+    },
+    "pieza_nombre": {
+      "type": "string",
+      "title": "Nombre de la Pieza"
+    },
+    "descripcion_dano": {
+      "type": "string",
+      "title": "Descripci\u00f3n del Da\u00f1o"
+    },
+    "tipo_repuesto": {
+      "type": "string",
+      "title": "Tipo de Repuesto",
+      "enum": [
+        "Nuevo",
+        "UTS"
+      ]
+    },
+    "cantidad": {
+      "type": "number",
+      "title": "Cantidad",
+      "default": 1
+    },
+    "estado": {
+      "type": "string",
+      "title": "Estado",
+      "enum": [
+        "Pendiente",
+        "Ordenado",
+        "Recibido",
+        "Cancelado"
+      ],
+      "default": "Pendiente"
+    },
+    "proveedor": {
+      "type": "string",
+      "title": "Proveedor"
+    },
+    "precio_compra": {
+      "type": "number",
+      "title": "Precio de Compra"
+    },
+    "fecha_requerido": {
+      "type": "string",
+      "title": "Fecha Requerida",
+      "format": "date"
+    },
+    "fecha_ordenado": {
+      "type": "string",
+      "title": "Fecha Ordenado",
+      "format": "date"
+    },
+    "fecha_recibido": {
+      "type": "string",
+      "title": "Fecha Recibido",
+      "format": "date"
+    },
+    "notas": {
+      "type": "string",
+      "title": "Notas"
+    }
+  },
+  "required": [
+    "orden_id",
+    "pieza_nombre",
+    "tipo_repuesto"
+  ]
+}

@@ -1,0 +1,146 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Barlow+Condensed:wght@500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 224 71% 4%;
+    --foreground: 213 31% 91%;
+    --card: 222 47% 8%;
+    --card-foreground: 213 31% 91%;
+    --popover: 222 47% 8%;
+    --popover-foreground: 213 31% 91%;
+    --primary: 45 100% 54%;
+    --primary-foreground: 224 71% 4%;
+    --secondary: 222 47% 12%;
+    --secondary-foreground: 213 31% 91%;
+    --muted: 223 47% 11%;
+    --muted-foreground: 215 20% 55%;
+    --accent: 0 80% 40%;
+    --accent-foreground: 213 31% 91%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 216 34% 17%;
+    --input: 216 34% 17%;
+    --ring: 45 100% 54%;
+    --radius: 0.6rem;
+    --font-heading: 'Barlow Condensed', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Barlow Condensed', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    /* Custom tokens */
+    --fonseca-yellow: 45 100% 54%;
+    --fonseca-red: 0 80% 40%;
+    --fonseca-blue: 221 83% 28%;
+    --fonseca-dark: 224 71% 4%;
+    --fonseca-card: 222 47% 8%;
+    --fonseca-border: 216 34% 17%;
+
+    --sidebar-background: 222 47% 6%;
+    --sidebar-foreground: 213 31% 91%;
+    --sidebar-primary: 45 100% 54%;
+    --sidebar-primary-foreground: 224 71% 4%;
+    --sidebar-accent: 222 47% 12%;
+    --sidebar-accent-foreground: 213 31% 91%;
+    --sidebar-border: 216 34% 17%;
+    --sidebar-ring: 45 100% 54%;
+  }
+
+  .dark {
+    --background: 224 71% 4%;
+    --foreground: 213 31% 91%;
+    --card: 222 47% 8%;
+    --card-foreground: 213 31% 91%;
+    --popover: 222 47% 8%;
+    --popover-foreground: 213 31% 91%;
+    --primary: 45 100% 54%;
+    --primary-foreground: 224 71% 4%;
+    --secondary: 222 47% 12%;
+    --secondary-foreground: 213 31% 91%;
+    --muted: 223 47% 11%;
+    --muted-foreground: 215 20% 55%;
+    --accent: 0 80% 40%;
+    --accent-foreground: 213 31% 91%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 216 34% 17%;
+    --input: 216 34% 17%;
+    --ring: 45 100% 54%;
+    --sidebar-background: 222 47% 6%;
+    --sidebar-foreground: 213 31% 91%;
+    --sidebar-primary: 45 100% 54%;
+    --sidebar-primary-foreground: 224 71% 4%;
+    --sidebar-accent: 222 47% 12%;
+    --sidebar-accent-foreground: 213 31% 91%;
+    --sidebar-border: 216 34% 17%;
+    --sidebar-ring: 45 100% 54%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
+  }
+}
+
+@layer components {
+  .fonseca-yellow { color: hsl(var(--fonseca-yellow)); }
+  .fonseca-red { color: hsl(var(--fonseca-red)); }
+  .bg-fonseca-yellow { background-color: hsl(var(--fonseca-yellow)); }
+  .bg-fonseca-red { background-color: hsl(var(--fonseca-red)); }
+  .bg-fonseca-blue { background-color: hsl(var(--fonseca-blue)); }
+  .border-fonseca-yellow { border-color: hsl(var(--fonseca-yellow)); }
+  .border-fonseca-red { border-color: hsl(var(--fonseca-red)); }
+
+  .kanban-card {
+    @apply bg-card border border-border rounded-lg p-3 shadow-lg hover:border-primary/50 transition-all duration-200 cursor-pointer;
+  }
+
+  .station-badge {
+    @apply text-xs font-semibold px-2 py-0.5 rounded-full;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-150;
+  }
+
+  .nav-item.active {
+    @apply bg-primary text-primary-foreground;
+  }
+
+  .nav-item:not(.active) {
+    @apply text-muted-foreground hover:text-foreground hover:bg-secondary;
+  }
+
+  .form-label {
+    @apply text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 block;
+  }
+
+  .data-card {
+    @apply bg-card border border-border rounded-xl p-5;
+  }
+
+  .stat-card {
+    @apply bg-card border border-border rounded-xl p-4 flex flex-col gap-2;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: hsl(var(--background)); }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+
+/* Smooth transitions */
+* { transition-property: color, background-color, border-color; transition-duration: 150ms; }

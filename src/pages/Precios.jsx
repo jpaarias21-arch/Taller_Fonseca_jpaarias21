@@ -1,0 +1,230 @@
+import { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/use-toast";
+import { Search, Pencil, Check, X, Lock, Tag } from "lucide-react";
+import { useRole, ROLE_LABELS, ROLE_COLORS } from "@/lib/useRole";
+
+export default function Precios() {
+  const { toast } = useToast();
+  const { canEditPrices, roleLabel, roleColor } = useRole();
+  const isAdmin = canEditPrices;
+  const [piezas, setPiezas] = useState([]);
+  const [precios, setPrecios] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
+
+  useEffect(() => {
+    const load = async () => {
+      const [cats, prs] = await Promise.all([
+        base44.entities.PiezaCatalogo.filter({ activo: true }),
+        base44.entities.PrecioPieza.list(),
+      ]);
+      setPiezas(cats);
+      setPrecios(prs);
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  // Merged list: piezas del catálogo con su precio (si existe)
+  const merged = piezas.map(p => {
+    const precio = precios.find(pr => pr.pieza_id === p.id);
+    return {
+      pieza_id: p.id,
+      pieza_nombre: p.nombre,
+      pieza_categoria: p.categoria,
+      precio_base: precio?.precio_base ?? 0,
+      margen_porcentaje: precio?.margen_porcentaje ?? 0,
+      precio_final: precio?.precio_final ?? 0,
+      precio_hora_dm: precio?.precio_hora_dm ?? 0,
+      precio_hora_reparacion: precio?.precio_hora_reparacion ?? 0,
+      notas: precio?.notas ?? "",
+      _precio_id: precio?.id ?? null,
+    };
+  });
+
+  const filtered = merged.filter(p =>
+    p.pieza_nombre.toLowerCase().includes(search.toLowerCase()) ||
+    p.pieza_categoria?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const startEdit = (item) => {
+    setEditingId(item.pieza_id);
+    setEditForm({
+      precio_base: item.precio_base,
+      margen_porcentaje: item.margen_porcentaje,
+      precio_final: item.precio_final,
+      precio_hora_dm: item.precio_hora_dm,
+      precio_hora_reparacion: item.precio_hora_reparacion,
+      notas: item.notas,
+    });
+  };
+
+  const calcFinal = (base, margen) => {
+    const b = parseFloat(base) || 0;
+    const m = parseFloat(margen) || 0;
+    return +(b + b * m / 100).toFixed(2);
+  };
+
+  const handleEditChange = (key, val) => {
+    setEditForm(prev => {
+      const updated = { ...prev, [key]: val };
+      if (key === "precio_base" || key === "margen_porcentaje") {
+        updated.precio_final = calcFinal(
+          key === "precio_base" ? val : prev.precio_base,
+          key === "margen_porcentaje" ? val : prev.margen_porcentaje
+        );
+      }
+      return updated;
+    });
+  };
+
+  const saveEdit = async (item) => {
+    const data = {
+      pieza_id: item.pieza_id,
+      pieza_nombre: item.pieza_nombre,
+      pieza_categoria: item.pieza_categoria,
+      precio_base: parseFloat(editForm.precio_base) || 0,
+      margen_porcentaje: parseFloat(editForm.margen_porcentaje) || 0,
+      precio_final: parseFloat(editForm.precio_final) || 0,
+      precio_hora_dm: parseFloat(editForm.precio_hora_dm) || 0,
+      precio_hora_reparacion: parseFloat(editForm.precio_hora_reparacion) || 0,
+      notas: editForm.notas || "",
+    };
+
+    let saved;
+    if (item._precio_id) {
+      saved = await base44.entities.PrecioPieza.update(item._precio_id, data);
+      setPrecios(prev => prev.map(p => p.id === item._precio_id ? { ...p, ...data } : p));
+    } else {
+      saved = await base44.entities.PrecioPieza.create(data);
+      setPrecios(prev => [...prev, saved]);
+    }
+
+    toast({ title: "Precio guardado", description: `${item.pieza_nombre} actualizado.` });
+    setEditingId(null);
+  };
+
+  const cancelEdit = () => { setEditingId(null); setEditForm({}); };
+
+  // Grouped by category
+  const categories = [...new Set(filtered.map(p => p.pieza_categoria))].sort();
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-64">
+      <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-heading font-bold uppercase tracking-wide">Lista de Precios</h1>
+          <p className="text-muted-foreground text-sm">
+            {isAdmin
+              ? "Modo administrador — puede editar precios y márgenes"
+              : "Solo lectura — los precios son definidos por el administrador"}
+          </p>
+        </div>
+        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border ${roleColor}`}>
+          {!isAdmin && <Lock size={14} />}
+          {roleLabel}{!isAdmin ? " — Solo lectura" : " — Puede editar"}
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="relative max-w-md">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Buscar pieza o categoría..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="pl-9 bg-card border-border"
+        />
+      </div>
+
+      {/* Table by category */}
+      {categories.map(cat => {
+        const items = filtered.filter(p => p.pieza_categoria === cat);
+        return (
+          <div key={cat} className="data-card p-0 overflow-hidden">
+            {/* Category header */}
+            <div className="px-4 py-2.5 bg-secondary/50 border-b border-border">
+              <h3 className="font-heading font-bold uppercase text-sm tracking-wide text-primary flex items-center gap-2">
+                <Tag size={13} /> {cat} ({items.length})
+              </h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/20">
+                    <th className="text-left py-2 px-4 text-muted-foreground font-semibold text-xs uppercase">Pieza</th>
+                    <th className="text-right py-2 px-3 text-muted-foreground font-semibold text-xs uppercase">Precio Base ₡</th>
+                    <th className="text-right py-2 px-3 text-muted-foreground font-semibold text-xs uppercase">Margen %</th>
+                    <th className="text-right py-2 px-3 text-muted-foreground font-semibold text-xs uppercase">Precio Final ₡</th>
+                    <th className="text-right py-2 px-3 text-muted-foreground font-semibold text-xs uppercase hidden md:table-cell">Hr D&M ₡</th>
+                    <th className="text-right py-2 px-3 text-muted-foreground font-semibold text-xs uppercase hidden md:table-cell">Hr Rep. ₡</th>
+                    {isAdmin && <th className="text-right py-2 px-4 text-muted-foreground font-semibold text-xs uppercase">Acción</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map(item => {
+                    const isEditing = editingId === item.pieza_id;
+                    return (
+                      <tr key={item.pieza_id} className={`border-b border-border/50 hover:bg-secondary/10 ${isEditing ? "bg-primary/5" : ""}`}>
+                        <td className="py-2.5 px-4 font-medium">{item.pieza_nombre}</td>
+
+                        {isEditing ? (
+                          <>
+                            <td className="py-2 px-3"><Input type="number" min={0} step="0.01" value={editForm.precio_base} onChange={e => handleEditChange("precio_base", e.target.value)} className="bg-card border-border h-7 text-xs text-right w-24 ml-auto" /></td>
+                            <td className="py-2 px-3"><Input type="number" min={0} max={100} step="0.1" value={editForm.margen_porcentaje} onChange={e => handleEditChange("margen_porcentaje", e.target.value)} className="bg-card border-border h-7 text-xs text-right w-20 ml-auto" /></td>
+                            <td className="py-2 px-3 text-right font-bold text-primary text-sm">₡{parseFloat(editForm.precio_final || 0).toFixed(2)}</td>
+                            <td className="py-2 px-3 hidden md:table-cell"><Input type="number" min={0} step="0.01" value={editForm.precio_hora_dm} onChange={e => handleEditChange("precio_hora_dm", e.target.value)} className="bg-card border-border h-7 text-xs text-right w-20 ml-auto" /></td>
+                            <td className="py-2 px-3 hidden md:table-cell"><Input type="number" min={0} step="0.01" value={editForm.precio_hora_reparacion} onChange={e => handleEditChange("precio_hora_reparacion", e.target.value)} className="bg-card border-border h-7 text-xs text-right w-20 ml-auto" /></td>
+                            <td className="py-2 px-4 text-right">
+                              <div className="flex justify-end gap-1">
+                                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-green-400 hover:bg-green-500/10" onClick={() => saveEdit(item)}><Check size={14} /></Button>
+                                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" onClick={cancelEdit}><X size={14} /></Button>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="py-2.5 px-3 text-right text-muted-foreground">₡{item.precio_base.toFixed(2)}</td>
+                            <td className="py-2.5 px-3 text-right text-muted-foreground">{item.margen_porcentaje}%</td>
+                            <td className="py-2.5 px-3 text-right font-bold text-primary">₡{item.precio_final.toFixed(2)}</td>
+                            <td className="py-2.5 px-3 text-right text-muted-foreground hidden md:table-cell">₡{item.precio_hora_dm.toFixed(2)}</td>
+                            <td className="py-2.5 px-3 text-right text-muted-foreground hidden md:table-cell">₡{item.precio_hora_reparacion.toFixed(2)}</td>
+                            {isAdmin && (
+                              <td className="py-2.5 px-4 text-right">
+                                <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground hover:text-primary gap-1" onClick={() => startEdit(item)}>
+                                  <Pencil size={12} /> Editar
+                                </Button>
+                              </td>
+                            )}
+                          </>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+
+      {filtered.length === 0 && !loading && (
+        <div className="text-center py-16 text-muted-foreground">
+          {search ? "No se encontraron piezas con ese criterio" : "No hay piezas en el catálogo"}
+        </div>
+      )}
+    </div>
+  );
+}

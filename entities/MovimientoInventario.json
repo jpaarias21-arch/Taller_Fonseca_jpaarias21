@@ -1,0 +1,53 @@
+{
+  "name": "MovimientoInventario",
+  "type": "object",
+  "properties": {
+    "inventario_id": {
+      "type": "string",
+      "title": "Producto ID"
+    },
+    "producto_nombre": {
+      "type": "string",
+      "title": "Nombre del Producto"
+    },
+    "tipo_movimiento": {
+      "type": "string",
+      "title": "Tipo",
+      "enum": [
+        "Entrada",
+        "Salida"
+      ],
+      "default": "Salida"
+    },
+    "cantidad": {
+      "type": "number",
+      "title": "Cantidad"
+    },
+    "orden_id": {
+      "type": "string",
+      "title": "Orden de Trabajo ID (obligatorio en salidas)"
+    },
+    "numero_orden": {
+      "type": "string",
+      "title": "N\u00famero de Orden"
+    },
+    "motivo": {
+      "type": "string",
+      "title": "Motivo"
+    },
+    "usuario_id": {
+      "type": "string",
+      "title": "Usuario que realiz\u00f3 el movimiento"
+    },
+    "usuario_nombre": {
+      "type": "string",
+      "title": "Nombre del Usuario"
+    }
+  },
+  "required": [
+    "inventario_id",
+    "producto_nombre",
+    "tipo_movimiento",
+    "cantidad"
+  ]
+}

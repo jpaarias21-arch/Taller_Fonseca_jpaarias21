@@ -1,0 +1,197 @@
+{
+  "name": "OrdenTrabajo",
+  "type": "object",
+  "properties": {
+    "numero_orden": {
+      "type": "string",
+      "title": "N\u00famero de Orden"
+    },
+    "cliente_id": {
+      "type": "string",
+      "title": "Cliente ID"
+    },
+    "cliente_nombre": {
+      "type": "string",
+      "title": "Nombre del Cliente"
+    },
+    "cliente_telefono": {
+      "type": "string",
+      "title": "Tel\u00e9fono"
+    },
+    "cliente_cedula": {
+      "type": "string",
+      "title": "C\u00e9dula"
+    },
+    "lugar_procedencia": {
+      "type": "string",
+      "title": "Lugar de Procedencia"
+    },
+    "recomendado_por": {
+      "type": "string",
+      "title": "Recomendado Por"
+    },
+    "placa": {
+      "type": "string",
+      "title": "Placa del Veh\u00edculo"
+    },
+    "marca": {
+      "type": "string",
+      "title": "Marca"
+    },
+    "modelo": {
+      "type": "string",
+      "title": "Modelo"
+    },
+    "anio": {
+      "type": "number",
+      "title": "A\u00f1o"
+    },
+    "color": {
+      "type": "string",
+      "title": "Color"
+    },
+    "codigo_pintura": {
+      "type": "string",
+      "title": "C\u00f3digo de Pintura"
+    },
+    "kilometraje": {
+      "type": "number",
+      "title": "Kilometraje"
+    },
+    "numero_predio": {
+      "type": "string",
+      "title": "N\u00famero de Predio"
+    },
+    "es_asegurado": {
+      "type": "boolean",
+      "title": "Es Asegurado",
+      "default": false
+    },
+    "aseguradora": {
+      "type": "string",
+      "title": "Aseguradora"
+    },
+    "numero_reclamo": {
+      "type": "string",
+      "title": "N\u00famero de Reclamo"
+    },
+    "monto_autorizado_seguro": {
+      "type": "number",
+      "title": "Monto Autorizado por Seguro"
+    },
+    "adelanto_dinero": {
+      "type": "number",
+      "title": "Adelanto de Dinero",
+      "default": 0
+    },
+    "estado_cotizacion": {
+      "type": "string",
+      "title": "Estado Cotizaci\u00f3n",
+      "enum": [
+        "Borrador",
+        "Enviado",
+        "Aprobado",
+        "Autorizado por Seguro",
+        "Ampliaci\u00f3n"
+      ],
+      "default": "Borrador"
+    },
+    "estado_kanban": {
+      "type": "string",
+      "title": "Estado Kanban",
+      "enum": [
+        "Recepci\u00f3n",
+        "Espera de Autorizaci\u00f3n",
+        "Desarmado",
+        "Enderezado",
+        "Preparaci\u00f3n",
+        "Cabina de Pintura",
+        "Armado",
+        "Pulido",
+        "Control de Calidad",
+        "Entregado"
+      ],
+      "default": "Recepci\u00f3n"
+    },
+    "evaluador_id": {
+      "type": "string",
+      "title": "Evaluador ID"
+    },
+    "evaluador_nombre": {
+      "type": "string",
+      "title": "Nombre del Evaluador"
+    },
+    "recibidor_nombre": {
+      "type": "string",
+      "title": "Nombre del Recibidor"
+    },
+    "enderezador_nombre": {
+      "type": "string",
+      "title": "Nombre del Enderezador"
+    },
+    "tecnico_actual_id": {
+      "type": "string",
+      "title": "T\u00e9cnico Actual ID"
+    },
+    "tecnico_actual_nombre": {
+      "type": "string",
+      "title": "Nombre del T\u00e9cnico Actual"
+    },
+    "fecha_ingreso": {
+      "type": "string",
+      "title": "Fecha de Ingreso",
+      "format": "date"
+    },
+    "fecha_entrega_estimada": {
+      "type": "string",
+      "title": "Fecha Entrega Estimada",
+      "format": "date"
+    },
+    "fecha_entrega_real": {
+      "type": "string",
+      "title": "Fecha Entrega Real",
+      "format": "date"
+    },
+    "fotos": {
+      "type": "array",
+      "title": "Fotos del Veh\u00edculo",
+      "items": {
+        "type": "string"
+      }
+    },
+    "descripcion_danos": {
+      "type": "string",
+      "title": "Descripci\u00f3n General de Da\u00f1os"
+    },
+    "monto_cotizado": {
+      "type": "number",
+      "title": "Monto Cotizado",
+      "default": 0
+    },
+    "monto_final": {
+      "type": "number",
+      "title": "Monto Final",
+      "default": 0
+    },
+    "notas_internas": {
+      "type": "string",
+      "title": "Notas Internas"
+    },
+    "historial_kanban": {
+      "type": "array",
+      "title": "Historial Kanban",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "required": [
+    "placa",
+    "marca",
+    "modelo",
+    "anio",
+    "cliente_nombre",
+    "cliente_telefono",
+    "fecha_ingreso"
+  ]
+}

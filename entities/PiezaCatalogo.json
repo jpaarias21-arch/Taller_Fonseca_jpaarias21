@@ -1,0 +1,37 @@
+{
+  "name": "PiezaCatalogo",
+  "type": "object",
+  "properties": {
+    "nombre": {
+      "type": "string",
+      "title": "Nombre de la Pieza"
+    },
+    "categoria": {
+      "type": "string",
+      "title": "Categor\u00eda",
+      "enum": [
+        "Carrocer\u00eda Frontal",
+        "Carrocer\u00eda Lateral",
+        "Carrocer\u00eda Trasera",
+        "Techo y Piso",
+        "Iluminaci\u00f3n",
+        "Vidrios",
+        "Mec\u00e1nica Visible",
+        "Interior"
+      ]
+    },
+    "codigo": {
+      "type": "string",
+      "title": "C\u00f3digo interno"
+    },
+    "activo": {
+      "type": "boolean",
+      "title": "Activo",
+      "default": true
+    }
+  },
+  "required": [
+    "nombre",
+    "categoria"
+  ]
+}

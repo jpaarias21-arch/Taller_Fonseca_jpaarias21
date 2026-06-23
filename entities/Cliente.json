@@ -1,0 +1,39 @@
+{
+  "name": "Cliente",
+  "type": "object",
+  "properties": {
+    "nombre_completo": {
+      "type": "string",
+      "title": "Nombre Completo"
+    },
+    "telefono": {
+      "type": "string",
+      "title": "Tel\u00e9fono"
+    },
+    "email": {
+      "type": "string",
+      "title": "Email",
+      "format": "email"
+    },
+    "cedula": {
+      "type": "string",
+      "title": "C\u00e9dula/DUI"
+    },
+    "lugar_procedencia": {
+      "type": "string",
+      "title": "Lugar de Procedencia"
+    },
+    "recomendado_por": {
+      "type": "string",
+      "title": "Recomendado Por"
+    },
+    "notas": {
+      "type": "string",
+      "title": "Notas"
+    }
+  },
+  "required": [
+    "nombre_completo",
+    "telefono"
+  ]
+}

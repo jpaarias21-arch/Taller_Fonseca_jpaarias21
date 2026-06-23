@@ -1,0 +1,91 @@
+{
+  "name": "LineaAvaluo",
+  "type": "object",
+  "properties": {
+    "orden_id": {
+      "type": "string",
+      "title": "Orden de Trabajo ID"
+    },
+    "pieza_id": {
+      "type": "string",
+      "title": "Pieza ID (del cat\u00e1logo)"
+    },
+    "pieza_nombre": {
+      "type": "string",
+      "title": "Nombre de la Pieza"
+    },
+    "pieza_categoria": {
+      "type": "string",
+      "title": "Categor\u00eda de la Pieza"
+    },
+    "flag_desarmado_montaje": {
+      "type": "boolean",
+      "title": "D&M (Desarmado y Montaje)",
+      "default": false
+    },
+    "flag_reparacion": {
+      "type": "boolean",
+      "title": "Reparaci\u00f3n",
+      "default": false
+    },
+    "flag_pintura": {
+      "type": "boolean",
+      "title": "Pintura",
+      "default": false
+    },
+    "tipo_repuesto": {
+      "type": "string",
+      "title": "Tipo de Repuesto",
+      "enum": [
+        "Ninguno",
+        "Nuevo",
+        "Reparaci\u00f3n",
+        "UTS"
+      ],
+      "default": "Ninguno"
+    },
+    "descripcion_dano": {
+      "type": "string",
+      "title": "Descripci\u00f3n T\u00e9cnica del Da\u00f1o"
+    },
+    "horas_dm": {
+      "type": "number",
+      "title": "Horas D&M",
+      "default": 0
+    },
+    "horas_reparacion": {
+      "type": "number",
+      "title": "Horas Reparaci\u00f3n",
+      "default": 0
+    },
+    "costo_pintura": {
+      "type": "number",
+      "title": "Costo Pintura",
+      "default": 0
+    },
+    "costo_repuesto": {
+      "type": "number",
+      "title": "Costo Repuesto",
+      "default": 0
+    },
+    "subtotal": {
+      "type": "number",
+      "title": "Subtotal",
+      "default": 0
+    },
+    "es_ampliacion": {
+      "type": "boolean",
+      "title": "Es Ampliaci\u00f3n",
+      "default": false
+    },
+    "ampliacion_ref": {
+      "type": "string",
+      "title": "Referencia Ampliaci\u00f3n"
+    }
+  },
+  "required": [
+    "orden_id",
+    "pieza_id",
+    "pieza_nombre"
+  ]
+}
