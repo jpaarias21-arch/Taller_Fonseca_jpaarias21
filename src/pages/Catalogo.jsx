@@ -6,8 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
-import { Plus, Search, Wrench, Pencil, ToggleLeft, ToggleRight, Lock } from "lucide-react";
-import { Switch } from "@/components/ui/switch";
+import { Plus, Search, Wrench, Pencil, Lock } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 
 const CATEGORIAS = [
@@ -16,8 +15,8 @@ const CATEGORIAS = [
 ];
 
 function PiezaModal({ open, onClose, onSave, initial }) {
-  const [form, setForm] = useState(initial || { nombre: "", categoria: "Carrocería Frontal", codigo: "", activo: true });
-  useEffect(() => { if (initial) setForm(initial); else setForm({ nombre: "", categoria: "Carrocería Frontal", codigo: "", activo: true }); }, [initial]);
+  const [form, setForm] = useState(initial || { nombre: "", categoria: "Carrocería Frontal", codigo: "" });
+  useEffect(() => { if (initial) setForm(initial); else setForm({ nombre: "", categoria: "Carrocería Frontal", codigo: "" }); }, [initial]);
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -42,10 +41,6 @@ function PiezaModal({ open, onClose, onSave, initial }) {
           <div>
             <label className="form-label">Código Interno</label>
             <Input value={form.codigo} onChange={e => setForm(f => ({ ...f, codigo: e.target.value }))} className="bg-secondary border-border" placeholder="P-001" />
-          </div>
-          <div className="flex items-center gap-3">
-            <Switch checked={form.activo} onCheckedChange={v => setForm(f => ({ ...f, activo: v }))} />
-            <span className="text-sm text-muted-foreground">Activo (disponible en avalúos)</span>
           </div>
           <div className="flex gap-3 justify-end pt-2">
             <Button variant="outline" className="border-border" onClick={onClose}>Cancelar</Button>
@@ -77,22 +72,56 @@ export default function Catalogo() {
   }, []);
 
   const savePieza = async (form) => {
-    if (form.id) {
-      await base44.entities.PiezaCatalogo.update(form.id, form);
-      setPiezas(prev => prev.map(p => p.id === form.id ? { ...p, ...form } : p));
-      toast({ title: "Pieza actualizada" });
-    } else {
-      const nueva = await base44.entities.PiezaCatalogo.create(form);
-      setPiezas(prev => [...prev, nueva]);
-      toast({ title: "Pieza creada en el catálogo" });
-    }
-    setModal(false);
-    setEditPieza(null);
-  };
+    const payload = {
+      nombre: (form.nombre || "").trim(),
+      categoria: form.categoria,
+      codigo: (form.codigo || "").trim(),
+      ...(form.id ? { id: form.id } : {}),
+    };
 
-  const toggleActivo = async (pieza) => {
-    await base44.entities.PiezaCatalogo.update(pieza.id, { activo: !pieza.activo });
-    setPiezas(prev => prev.map(p => p.id === pieza.id ? { ...p, activo: !p.activo } : p));
+    if (!payload.nombre) {
+      toast({
+        title: "Nombre requerido",
+        description: "Debe ingresar el nombre de la pieza.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (payload.codigo) {
+      const codigoExiste = piezas.some(
+        (p) => p.id !== payload.id && (p.codigo || "").trim().toLowerCase() === payload.codigo.toLowerCase()
+      );
+      if (codigoExiste) {
+        toast({
+          title: "Código duplicado",
+          description: "Ya existe una pieza con ese código interno.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    try {
+      if (payload.id) {
+        await base44.entities.PiezaCatalogo.update(payload.id, payload);
+        setPiezas(prev => prev.map(p => p.id === payload.id ? { ...p, ...payload } : p));
+        toast({ title: "Pieza actualizada" });
+      } else {
+        const nueva = await base44.entities.PiezaCatalogo.create(payload);
+        setPiezas(prev => [...prev, nueva]);
+        toast({ title: "Pieza creada en el catálogo" });
+      }
+      setFilterCat("todas");
+      setModal(false);
+      setEditPieza(null);
+    } catch (error) {
+      toast({
+        title: "No se pudo guardar la pieza",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive",
+      });
+    }
   };
 
   const searchLower = search.toLowerCase();
@@ -113,7 +142,7 @@ export default function Catalogo() {
     }, {});
   }, [filtered]);
 
-  const piezasActivas = useMemo(() => piezas.filter((p) => p.activo).length, [piezas]);
+  const totalPiezas = useMemo(() => piezas.length, [piezas]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -121,7 +150,7 @@ export default function Catalogo() {
         <div>
           <h1 className="text-3xl font-heading font-bold uppercase tracking-wide">Catálogo de Piezas</h1>
           <p className="text-muted-foreground text-sm">
-            Maestro estandarizado — {piezasActivas} piezas activas
+            Maestro estandarizado — {totalPiezas} piezas registradas
           </p>
         </div>
         {canManageCatalog ? (
@@ -164,16 +193,13 @@ export default function Catalogo() {
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {items.map(p => (
-                  <div key={p.id} className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${p.activo ? "bg-secondary/40 border-border" : "bg-secondary/10 border-border/30 opacity-60"}`}>
+                  <div key={p.id} className="flex items-center justify-between p-3 rounded-lg border transition-colors bg-secondary/40 border-border">
                     <div>
-                      <p className={`text-sm font-medium ${!p.activo ? "line-through text-muted-foreground" : ""}`}>{p.nombre}</p>
+                      <p className="text-sm font-medium">{p.nombre}</p>
                       {p.codigo && <p className="text-xs text-muted-foreground">{p.codigo}</p>}
                     </div>
                     {canManageCatalog && (
                       <div className="flex items-center gap-1">
-                        <button onClick={() => toggleActivo(p)} className="p-1 hover:text-primary transition-colors text-muted-foreground" title={p.activo ? "Desactivar" : "Activar"}>
-                          {p.activo ? <ToggleRight size={16} className="text-primary" /> : <ToggleLeft size={16} />}
-                        </button>
                         <button onClick={() => { setEditPieza(p); setModal(true); }} className="p-1 hover:text-primary transition-colors text-muted-foreground">
                           <Pencil size={14} />
                         </button>

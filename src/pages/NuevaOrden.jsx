@@ -13,10 +13,24 @@ import { Link } from "react-router-dom";
 
 const MARCAS = ["Toyota","Honda","Hyundai","Kia","Nissan","Ford","Chevrolet","Mitsubishi","Mazda","Volkswagen","BMW","Mercedes-Benz","Audi","Suzuki","Subaru","Otro"];
 
+const normalizeText = (value) =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
 function PiezaSelector({ piezas, onSelect }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
-  const filtered = piezas.filter(p => p.nombre.toLowerCase().includes(query.toLowerCase()));
+  const queryNormalized = normalizeText(query);
+  const filtered = piezas.filter((p) => {
+    if (!queryNormalized) return true;
+    const nombre = normalizeText(p.nombre);
+    const codigo = normalizeText(p.codigo);
+    const categoria = normalizeText(p.categoria);
+    return nombre.includes(queryNormalized) || codigo.includes(queryNormalized) || categoria.includes(queryNormalized);
+  });
   return (
     <div className="relative">
       <div className="relative">
@@ -39,7 +53,7 @@ function PiezaSelector({ piezas, onSelect }) {
               onClick={() => { onSelect(p); setQuery(""); setOpen(false); }}
             >
               <p className="font-medium text-foreground">{p.nombre}</p>
-              <p className="text-xs text-muted-foreground">{p.categoria}</p>
+              <p className="text-xs text-muted-foreground">{p.categoria}{p.codigo ? ` · ${p.codigo}` : ""}</p>
             </button>
           ))}
         </div>
@@ -78,7 +92,9 @@ export default function NuevaOrden() {
   });
 
   useEffect(() => {
-    base44.entities.PiezaCatalogo.filter({ activo: true }).then(setPiezas);
+    base44.entities.PiezaCatalogo.list("nombre", 1000)
+      .then(setPiezas)
+      .catch(() => setPiezas([]));
   }, []);
 
   const updateForm = (key, val) => setForm(f => ({ ...f, [key]: val }));
@@ -219,8 +235,25 @@ export default function NuevaOrden() {
   const handleFotoUpload = async (e) => {
     const files = Array.from(e.target.files);
     for (const file of files) {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      setFotos(prev => [...prev, file_url]);
+      try {
+        const { file_url, persisted_inline, storage_error } = await base44.integrations.Core.UploadFile({ file });
+        setFotos(prev => [...prev, file_url]);
+        if (persisted_inline) {
+          toast({
+            title: "Foto cargada en modo temporal",
+            description: storage_error
+              ? `Se guardó embebida porque storage no está disponible: ${storage_error}`
+              : "Se guardó embebida porque storage no está disponible.",
+            variant: "destructive"
+          });
+        }
+      } catch (error) {
+        toast({
+          title: "No se pudo subir una foto",
+          description: error?.message || "Verifique permisos del bucket de storage y reintente.",
+          variant: "destructive"
+        });
+      }
     }
   };
 
@@ -251,9 +284,23 @@ export default function NuevaOrden() {
     setSaving(true);
     const numeroOrden = `OT-${Date.now().toString().slice(-6)}`;
 
+    const fechaIngresoConHora = (() => {
+      const raw = String(form.fecha_ingreso || "").trim();
+      if (!raw) return raw;
+      if (raw.includes("T")) return raw;
+
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      const ss = String(now.getSeconds()).padStart(2, "0");
+
+      return `${raw}T${hh}:${mm}:${ss}`;
+    })();
+
     try {
       const ordenData = {
         ...form,
+        fecha_ingreso: fechaIngresoConHora,
         numero_orden: numeroOrden,
         kilometraje: Number(form.kilometraje) || 0,
         anio: Number(form.anio),

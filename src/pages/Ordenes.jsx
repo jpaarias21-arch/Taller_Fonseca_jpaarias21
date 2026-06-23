@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { Plus, Search, Car, Filter, ArrowRight } from "lucide-react";
 import { useRole } from "@/lib/useRole";
+import { formatDisplayDateTime } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -172,7 +173,7 @@ export default function Ordenes() {
                       </div>
                       <div>
                         <p className="text-[10px] uppercase text-muted-foreground font-bold tracking-wider mb-0.5">Ingreso</p>
-                        <p className="text-sm font-medium">{orden.fecha_ingreso || "—"}</p>
+                        <p className="text-sm font-medium">{formatDisplayDateTime(orden.fecha_ingreso)}</p>
                       </div>
                     </div>
 

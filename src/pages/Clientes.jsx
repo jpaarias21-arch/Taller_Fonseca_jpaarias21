@@ -5,6 +5,7 @@ import { base44 } from "@/api/base44Client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search, User, Car, Phone, MapPin, Shield, Eye, Users, Clock, FileText } from "lucide-react";
+import { formatDisplayDateTime } from "@/lib/utils";
 
 export default function Clientes() {
   const [ordenes, setOrdenes] = useState([]);
@@ -263,7 +264,7 @@ export default function Clientes() {
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                           <div>
                             <p className="text-muted-foreground uppercase tracking-wider mb-0.5">Ingreso</p>
-                            <p className="font-medium flex items-center gap-1"><Clock size={10} className="text-muted-foreground" />{o.fecha_ingreso}</p>
+                            <p className="font-medium flex items-center gap-1"><Clock size={10} className="text-muted-foreground" />{formatDisplayDateTime(o.fecha_ingreso)}</p>
                           </div>
                           <div>
                             <p className="text-muted-foreground uppercase tracking-wider mb-0.5">Estado</p>

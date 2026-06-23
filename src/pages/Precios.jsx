@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
 import { Search, Pencil, Check, X, Lock, Tag } from "lucide-react";
-import { useRole, ROLE_LABELS, ROLE_COLORS } from "@/lib/useRole";
+import { useRole } from "@/lib/useRole";
 
 export default function Precios() {
   const { toast } = useToast();
@@ -21,7 +21,7 @@ export default function Precios() {
   useEffect(() => {
     const load = async () => {
       const [cats, prs] = await Promise.all([
-        base44.entities.PiezaCatalogo.filter({ activo: true }),
+        base44.entities.PiezaCatalogo.list("nombre", 2000),
         base44.entities.PrecioPieza.list(),
       ]);
       setPiezas(cats);
@@ -68,6 +68,14 @@ export default function Precios() {
   }, [merged, searchLower]);
 
   const startEdit = (item) => {
+    if (!isAdmin) {
+      toast({
+        title: "Sin permisos",
+        description: "Solo el Dueño puede modificar precios.",
+        variant: "destructive",
+      });
+      return;
+    }
     setEditingId(item.pieza_id);
     setEditForm({
       precio_base: item.precio_base,
@@ -99,6 +107,15 @@ export default function Precios() {
   };
 
   const saveEdit = async (item) => {
+    if (!isAdmin) {
+      toast({
+        title: "Sin permisos",
+        description: "Solo el Dueño puede modificar precios.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const data = {
       pieza_id: item.pieza_id,
       pieza_nombre: item.pieza_nombre,

@@ -12,7 +12,7 @@ const TABLE_BY_ENTITY = {
 	OrdenTrabajo: "orden_trabajo",
 	LineaAvaluo: "linea_avaluo",
 	RequerimientoCompra: "requerimiento_compra",
-	PiezaCatalogo: "pieza_catalogo",
+	PiezaCatalogo: "pieza",
 	PrecioPieza: "precio_pieza",
 	Inventario: "inventario",
 	MovimientoInventario: "movimiento_inventario",
@@ -325,12 +325,41 @@ const integrations = {
 		async UploadFile({ file }) {
 			if (!file) throw new Error("Archivo inválido");
 
+			const fileToDataUrl =
+				typeof FileReader !== "undefined"
+					? (inputFile) =>
+						new Promise((resolve, reject) => {
+							const reader = new FileReader();
+							reader.onload = () => resolve(reader.result);
+							reader.onerror = () => reject(new Error("No se pudo leer la foto"));
+							reader.readAsDataURL(inputFile);
+						})
+					: null;
+
 			const ext = file.name?.split(".").pop() || "bin";
 			const path = `uploads/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 			const { error } = await supabase.storage.from("uploads").upload(path, file, { upsert: false });
 
 			if (error) {
-				return { file_url: URL.createObjectURL(file) };
+				const message = String(error.message || "").toLowerCase();
+				const canFallbackInline =
+					!!fileToDataUrl &&
+					(message.includes("bucket not found") ||
+						message.includes("not found") ||
+						message.includes("permission") ||
+						message.includes("row-level security") ||
+						message.includes("unauthorized"));
+
+				if (canFallbackInline) {
+					const dataUrl = await fileToDataUrl(file);
+					return {
+						file_url: typeof dataUrl === "string" ? dataUrl : "",
+						persisted_inline: true,
+						storage_error: error.message || "Storage no disponible"
+					};
+				}
+
+				throw toError(error, "No se pudo subir la foto");
 			}
 
 			const { data } = supabase.storage.from("uploads").getPublicUrl(path);

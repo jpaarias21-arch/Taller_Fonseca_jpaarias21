@@ -8,16 +8,37 @@ import { useToast } from "@/components/ui/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Package, Plus, Search, AlertTriangle, TrendingDown, TrendingUp, Boxes, FlaskConical, DollarSign, Lock } from "lucide-react";
 import { useRole } from "@/lib/useRole";
+import { formatColones } from "@/lib/utils";
 
 const CATEGORIAS = ["Pintura", "Lija", "Transparente", "Masilla", "Primer", "Thinner", "Repuesto Mecánico", "Herramienta", "Otro"];
 const UNIDADES = ["Litro", "Galón", "Unidad", "Kilo", "Metro", "Caja"];
 
+const buildProductoForm = (data = {}) => {
+  const safeData = data ?? {};
+  return {
+    nombre: safeData.nombre ?? "",
+    codigo: safeData.codigo ?? "",
+    tipo: safeData.tipo ?? "Consumible Químico",
+    categoria: safeData.categoria ?? "Pintura",
+    unidad: safeData.unidad ?? "Litro",
+    stock_actual: String(safeData.stock_actual ?? 0),
+    stock_minimo: String(safeData.stock_minimo ?? 0),
+    precio_unitario: String(safeData.precio_unitario ?? 0),
+    proveedor: safeData.proveedor ?? "",
+    ...(safeData.id ? { id: safeData.id } : {}),
+  };
+};
+
+const normalizeProductoPayload = (form) => ({
+  ...form,
+  stock_actual: Number(form.stock_actual || 0),
+  stock_minimo: Number(form.stock_minimo || 0),
+  precio_unitario: Number(form.precio_unitario || 0),
+});
+
 function ProductoModal({ open, onClose, onSave, initial }) {
-  const [form, setForm] = useState(initial || {
-    nombre: "", codigo: "", tipo: "Consumible Químico", categoria: "Pintura",
-    unidad: "Litro", stock_actual: 0, stock_minimo: 0, precio_unitario: 0, proveedor: "",
-  });
-  useEffect(() => { if (initial) setForm(initial); }, [initial]);
+  const [form, setForm] = useState(buildProductoForm(initial));
+  useEffect(() => { setForm(buildProductoForm(initial)); }, [initial, open]);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   return (
@@ -66,15 +87,26 @@ function ProductoModal({ open, onClose, onSave, initial }) {
             </div>
             <div>
               <label className="form-label">Stock Actual</label>
-              <Input type="number" min={0} value={form.stock_actual} onChange={e => set("stock_actual", Number(e.target.value))} className="bg-secondary border-border" />
+              <Input type="number" min={0} value={form.stock_actual} onChange={e => set("stock_actual", e.target.value)} className="bg-secondary border-border" />
             </div>
             <div>
               <label className="form-label">Stock Mínimo</label>
-              <Input type="number" min={0} value={form.stock_minimo} onChange={e => set("stock_minimo", Number(e.target.value))} className="bg-secondary border-border" />
+              <Input type="number" min={0} value={form.stock_minimo} onChange={e => set("stock_minimo", e.target.value)} className="bg-secondary border-border" />
             </div>
             <div>
               <label className="form-label">Precio Unitario ₡</label>
-              <Input type="number" min={0} step="0.01" value={form.precio_unitario} onChange={e => set("precio_unitario", Number(e.target.value))} className="bg-secondary border-border" />
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={form.precio_unitario}
+                onChange={e => set("precio_unitario", e.target.value)}
+                className="bg-secondary border-border"
+                disabled={!!initial?.id}
+              />
+              {initial?.id && (
+                <p className="text-xs text-muted-foreground mt-1">El precio unitario no se puede modificar desde Inventario.</p>
+              )}
             </div>
             <div>
               <label className="form-label">Proveedor</label>
@@ -83,7 +115,7 @@ function ProductoModal({ open, onClose, onSave, initial }) {
           </div>
           <div className="flex gap-3 justify-end pt-2">
             <Button variant="outline" className="border-border" onClick={onClose}>Cancelar</Button>
-            <Button className="bg-primary text-primary-foreground" onClick={() => onSave(form)}>
+            <Button className="bg-primary text-primary-foreground" onClick={() => onSave(normalizeProductoPayload(form))}>
               {initial?.id ? "Actualizar" : "Crear Producto"}
             </Button>
           </div>
@@ -194,8 +226,13 @@ export default function Inventario() {
 
   const saveProd = async (form) => {
     if (form.id) {
-      await base44.entities.Inventario.update(form.id, form);
-      setProductos(prev => prev.map(p => p.id === form.id ? { ...p, ...form } : p));
+      const current = productos.find((p) => p.id === form.id);
+      const safeForm = {
+        ...form,
+        precio_unitario: current?.precio_unitario ?? form.precio_unitario,
+      };
+      await base44.entities.Inventario.update(form.id, safeForm);
+      setProductos(prev => prev.map(p => p.id === form.id ? { ...p, ...safeForm } : p));
       toast({ title: "Producto actualizado" });
     } else {
       const nuevo = await base44.entities.Inventario.create(form);
@@ -317,7 +354,7 @@ export default function Inventario() {
         <div className="bg-card/70 backdrop-blur-md border border-white/10 rounded-xl p-4">
           <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Valor Total</p>
           <div className="flex items-end gap-2">
-            <span className="text-3xl font-heading font-bold text-green-400">₡{totalValor.toFixed(0)}</span>
+            <span className="text-3xl font-heading font-bold text-green-400">{formatColones(totalValor, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
             <DollarSign size={16} className="text-muted-foreground mb-1" />
           </div>
         </div>
@@ -398,7 +435,7 @@ export default function Inventario() {
                         <span className="text-muted-foreground text-xs ml-1">{prod.unidad}</span>
                         <p className="text-xs text-muted-foreground">mín: {prod.stock_minimo}</p>
                       </td>
-                      <td className="py-3 px-4 hidden sm:table-cell text-muted-foreground">₡{Number(prod.precio_unitario || 0).toFixed(2)}</td>
+                      <td className="py-3 px-4 hidden sm:table-cell text-muted-foreground">{formatColones(prod.precio_unitario || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex justify-end gap-1">
                           {canManageInventory && (

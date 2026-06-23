@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
+import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -12,6 +13,7 @@ import {
   Package, Wrench, DollarSign, FileText, History, Lock
 } from "lucide-react";
 import { useRole } from "@/lib/useRole";
+import { formatColones, formatDisplayDateTime } from "@/lib/utils";
 
 const ESTADO_COT_COLORS = {
   "Borrador": "bg-secondary text-muted-foreground border-border",
@@ -29,6 +31,32 @@ const KANBAN_STATIONS = [
 
 const OPERATIVE_STATIONS = ["Desarmado", "Enderezado", "Preparación", "Cabina de Pintura", "Armado", "Pulido", "Control de Calidad", "Entregado"];
 
+const normalizePhotoEntry = (value) => {
+  if (typeof value === "string") return value.trim();
+  if (value && typeof value === "object") {
+    return String(value.file_url || value.url || value.path || "").trim();
+  }
+  return "";
+};
+
+const extractUploadsPath = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  if (raw.startsWith("uploads/")) return raw.slice("uploads/".length);
+
+  try {
+    const parsed = new URL(raw);
+    const marker = "/uploads/";
+    const idx = parsed.pathname.indexOf(marker);
+    if (idx >= 0) return parsed.pathname.slice(idx + marker.length);
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
 export default function OrdenDetalle() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -40,6 +68,7 @@ export default function OrdenDetalle() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("info");
   const [updatingEstado, setUpdatingEstado] = useState(false);
+  const [fotosView, setFotosView] = useState([]);
 
   useEffect(() => {
     const load = async () => {
@@ -55,6 +84,46 @@ export default function OrdenDetalle() {
     };
     load();
   }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolveFotos = async () => {
+      const rawFotos = Array.isArray(orden?.fotos) ? orden.fotos : [];
+      const resolved = await Promise.all(
+        rawFotos.map(async (entry, i) => {
+          const raw = normalizePhotoEntry(entry);
+          if (!raw || raw.startsWith("blob:")) {
+            return { id: `${i}-invalid`, url: null };
+          }
+
+          if (raw.startsWith("data:image/")) {
+            return { id: `${i}-data`, url: raw };
+          }
+
+          const path = extractUploadsPath(raw);
+          if (!path) {
+            return { id: `${i}-url`, url: raw };
+          }
+
+          const signed = await supabase.storage.from("uploads").createSignedUrl(path, 60 * 60 * 24 * 7);
+          if (signed.data?.signedUrl) {
+            return { id: `${i}-signed`, url: signed.data.signedUrl };
+          }
+
+          const pub = supabase.storage.from("uploads").getPublicUrl(path);
+          return { id: `${i}-pub`, url: pub.data?.publicUrl || raw };
+        })
+      );
+
+      if (!cancelled) setFotosView(resolved);
+    };
+
+    resolveFotos();
+    return () => {
+      cancelled = true;
+    };
+  }, [orden?.fotos]);
 
   const handleEstadoCotizacion = async (nuevoEstado) => {
     setUpdatingEstado(true);
@@ -207,7 +276,7 @@ export default function OrdenDetalle() {
           </div>
           <div className="text-right">
             <p className="text-xs text-muted-foreground font-semibold uppercase">Total Cotizado</p>
-            <p className="text-2xl font-heading font-bold text-primary">${totalCotizado.toFixed(2)}</p>
+            <p className="text-2xl font-heading font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
           </div>
         </div>
         {(orden.estado_cotizacion === "Borrador" || orden.estado_cotizacion === "Enviado") && (
@@ -256,7 +325,7 @@ export default function OrdenDetalle() {
             <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
               <User size={16} className="text-primary" /> Cliente
             </h3>
-            {[["Nombre", orden.cliente_nombre], ["Teléfono", orden.cliente_telefono], ["Cédula", orden.cliente_cedula], ["Procedencia", orden.lugar_procedencia], ["Recomendado por", orden.recomendado_por], ["Fecha Ingreso", orden.fecha_ingreso]].map(item => item[1] ? (
+            {[["Nombre", orden.cliente_nombre], ["Teléfono", orden.cliente_telefono], ["Cédula", orden.cliente_cedula], ["Procedencia", orden.lugar_procedencia], ["Recomendado por", orden.recomendado_por], ["Fecha Ingreso", formatDisplayDateTime(orden.fecha_ingreso)]].map(item => item[1] ? (
               <div key={item[0]} className="flex justify-between text-sm border-b border-border/40 pb-2">
                 <span className="text-muted-foreground">{item[0]}</span>
                 <span className="font-medium text-right">{item[1]}</span>
@@ -290,7 +359,7 @@ export default function OrdenDetalle() {
             </div>
             {orden.es_asegurado && (
               <>
-                {[["Aseguradora", orden.aseguradora], ["Monto Autorizado", orden.monto_autorizado_seguro ? `₡${Number(orden.monto_autorizado_seguro).toLocaleString("es-CR")}` : null]].map(item => item[1] ? (
+                {[["Aseguradora", orden.aseguradora], ["Monto Autorizado", orden.monto_autorizado_seguro ? formatColones(orden.monto_autorizado_seguro, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : null]].map(item => item[1] ? (
                   <div key={item[0]} className="flex justify-between text-sm border-b border-border/40 pb-2">
                     <span className="text-muted-foreground">{item[0]}</span>
                     <span className="font-medium">{item[1]}</span>
@@ -315,11 +384,11 @@ export default function OrdenDetalle() {
             )}
             <div className="flex justify-between text-sm border-b border-border/40 pb-2">
               <span className="text-muted-foreground">Adelanto</span>
-              <span className="font-medium text-green-400">₡{Number(orden.adelanto_dinero || 0).toLocaleString("es-CR")}</span>
+              <span className="font-medium text-green-400">{formatColones(orden.adelanto_dinero || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Total Cotizado</span>
-              <span className="font-bold text-primary">₡{totalCotizado.toLocaleString("es-CR")}</span>
+              <span className="font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
             </div>
           </div>
         </div>
@@ -365,7 +434,7 @@ export default function OrdenDetalle() {
                     <td className="py-3 px-4 hidden lg:table-cell text-xs text-muted-foreground max-w-xs truncate">
                       {l.descripcion_dano || "—"}
                     </td>
-                    <td className="py-3 px-4 text-right font-semibold text-primary">${(l.subtotal || 0).toFixed(2)}</td>
+                    <td className="py-3 px-4 text-right font-semibold text-primary">{formatColones(l.subtotal || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                   </tr>
                 ))}
                 {lineas.length === 0 && (
@@ -376,7 +445,7 @@ export default function OrdenDetalle() {
                 <tfoot>
                   <tr className="bg-secondary/30 border-t border-border">
                     <td colSpan={6} className="py-3 px-4 text-right font-bold uppercase text-sm">Total</td>
-                    <td className="py-3 px-4 text-right font-bold text-primary text-lg">${totalCotizado.toFixed(2)}</td>
+                    <td className="py-3 px-4 text-right font-bold text-primary text-lg">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                   </tr>
                 </tfoot>
               )}
@@ -428,11 +497,11 @@ export default function OrdenDetalle() {
       {/* Tab: Fotos */}
       {tab === "fotos" && (
         <div>
-          {orden.fotos?.length > 0 ? (
+          {fotosView.filter((f) => !!f.url).length > 0 ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-              {orden.fotos.map((url, i) => (
-                <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-                  <img src={url} alt={`Foto ${i+1}`} className="w-full aspect-square object-cover rounded-lg border border-border hover:border-primary transition-colors" />
+              {fotosView.filter((f) => !!f.url).map((foto, i) => (
+                <a key={foto.id} href={foto.url} target="_blank" rel="noopener noreferrer">
+                  <img src={foto.url} alt={`Foto ${i+1}`} className="w-full aspect-square object-cover rounded-lg border border-border hover:border-primary transition-colors" />
                 </a>
               ))}
             </div>
@@ -441,6 +510,11 @@ export default function OrdenDetalle() {
               <Camera size={40} className="mx-auto mb-3 opacity-30" />
               <p>No hay fotos registradas para esta orden</p>
             </div>
+          )}
+          {fotosView.some((f) => !f.url) && (
+            <p className="text-xs text-yellow-400 mt-3">
+              Algunas fotos antiguas no se pueden mostrar porque fueron guardadas con URL temporal (blob).
+            </p>
           )}
         </div>
       )}
