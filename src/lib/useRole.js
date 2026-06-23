@@ -18,14 +18,38 @@ export const ROLE_COLORS = {
   empleado: "bg-green-500/20 text-green-400 border-green-500/40",
 };
 
+/** @type {Record<string, RoleKey>} */
+const ROLE_ALIASES = {
+  admin: "admin",
+  administrador: "admin",
+  dueno: "admin",
+  owner: "admin",
+  gerente: "gerente",
+  manager: "gerente",
+  empleado: "empleado",
+  tecnico: "empleado",
+  user: "user",
+  usuario: "user",
+  secretaria: "user",
+};
+
+/** @param {unknown} rawRole */
+function normalizeRole(rawRole) {
+  if (typeof rawRole !== "string") return "user";
+  const normalized = rawRole
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+
+  return ROLE_ALIASES[normalized] || "user";
+}
+
 export function useRole() {
   const { user } = /** @type {{ user: { role?: string } | null }} */ (useAuth());
   const userRecord = user && typeof user === "object" ? /** @type {Record<string, unknown>} */ (user) : null;
   const rawRole = userRecord?.role;
-  const role =
-    typeof rawRole === "string" && rawRole in ROLE_LABELS
-      ? /** @type {RoleKey} */ (rawRole)
-      : "user";
+  const role = /** @type {RoleKey} */ (normalizeRole(rawRole));
   const isAdmin = role === "admin";
   const isGerente = role === "gerente";
   const isEmpleado = role === "empleado";

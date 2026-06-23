@@ -24,6 +24,20 @@
       "type": "string",
       "title": "C\u00f3digo interno"
     },
+    "proveedor": {
+      "type": "string",
+      "title": "Proveedor"
+    },
+    "costo": {
+      "type": "number",
+      "title": "Costo (\u20a1)",
+      "default": 0
+    },
+    "precio": {
+      "type": "number",
+      "title": "Precio (\u20a1)",
+      "default": 0
+    },
     "activo": {
       "type": "boolean",
       "title": "Activo",

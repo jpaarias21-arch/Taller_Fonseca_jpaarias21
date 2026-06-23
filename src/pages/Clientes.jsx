@@ -1,44 +1,113 @@
 // @ts-nocheck
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, User, Car, Phone, MapPin, Shield, Eye, Users, Clock, FileText } from "lucide-react";
+import { Search, User, Car, Phone, MapPin, Shield, Eye, Users, Clock, FileText, Camera } from "lucide-react";
 import { formatDisplayDateTime } from "@/lib/utils";
+
+const normalize = (value = "") =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+const buildClientKey = (nombre, telefono, cedula) =>
+  `${normalize(nombre)}|${String(telefono || "").replace(/\D/g, "")}|${String(cedula || "").replace(/\D/g, "")}`;
 
 export default function Clientes() {
   const [ordenes, setOrdenes] = useState([]);
+  const [clientesDb, setClientesDb] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
+  const [savingPhoto, setSavingPhoto] = useState(false);
+  const [photoOverrides, setPhotoOverrides] = useState({});
+  const photoInputRef = useRef(null);
 
   useEffect(() => {
-    base44.entities.OrdenTrabajo.list("-created_date", 500).then(data => {
-      setOrdenes(data);
-      setLoading(false);
-    });
+    const loadData = async () => {
+      try {
+        const [ordenesData, clientesData] = await Promise.all([
+          base44.entities.OrdenTrabajo.list("-created_date", 500),
+          base44.entities.Cliente.list(),
+        ]);
+        setOrdenes(Array.isArray(ordenesData) ? ordenesData : []);
+        setClientesDb(Array.isArray(clientesData) ? clientesData : []);
+      } catch {
+        setOrdenes([]);
+        setClientesDb([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
   }, []);
 
-  // Group by client name (normalized)
+  const clientesDbById = useMemo(() => {
+    const index = new Map();
+    for (const c of clientesDb) {
+      if (c?.id !== undefined && c?.id !== null) {
+        index.set(String(c.id), c);
+      }
+    }
+    return index;
+  }, [clientesDb]);
+
+  const clientesDbByKey = useMemo(() => {
+    const index = new Map();
+    for (const c of clientesDb) {
+      const key = buildClientKey(c?.nombre_completo, c?.telefono, c?.cedula);
+      if (!index.has(key)) {
+        index.set(key, c);
+      }
+    }
+    return index;
+  }, [clientesDb]);
+
+  // Group by client key (name + phone + id card)
   const clientes = useMemo(() => {
     const grouped = {};
     ordenes.forEach((o) => {
-      const key = o.cliente_nombre?.toLowerCase().trim();
+      const key = buildClientKey(o.cliente_nombre, o.cliente_telefono, o.cliente_cedula);
       if (!key) return;
+
+      const dbMatch =
+        (o?.cliente_id ? clientesDbById.get(String(o.cliente_id)) : null) ||
+        clientesDbByKey.get(key) ||
+        null;
+
       if (!grouped[key]) {
         grouped[key] = {
+          key,
           nombre: o.cliente_nombre,
           telefono: o.cliente_telefono,
           cedula: o.cliente_cedula,
           procedencia: o.lugar_procedencia,
+          db_cliente_id: dbMatch?.id ?? o?.cliente_id ?? null,
+          foto_url: dbMatch?.foto_url || null,
           ordenes: [],
         };
       }
+
+      if (!grouped[key].db_cliente_id && (dbMatch?.id || o?.cliente_id)) {
+        grouped[key].db_cliente_id = dbMatch?.id ?? o?.cliente_id;
+      }
+
       grouped[key].ordenes.push(o);
     });
+
+    Object.values(grouped).forEach((cliente) => {
+      if (photoOverrides[cliente.key]) {
+        cliente.foto_url = photoOverrides[cliente.key];
+      }
+    });
+
     return grouped;
-  }, [ordenes]);
+  }, [ordenes, clientesDbById, clientesDbByKey, photoOverrides]);
 
   const searchLower = search.toLowerCase();
 
@@ -53,10 +122,49 @@ export default function Clientes() {
     });
   }, [clientes, searchLower]);
 
-  const selectedData = useMemo(
-    () => (selected ? clientes[selected.toLowerCase().trim()] : null),
-    [clientes, selected]
-  );
+  const selectedData = useMemo(() => (selected ? clientes[selected] : null), [clientes, selected]);
+
+  const triggerPhotoPicker = () => {
+    photoInputRef.current?.click();
+  };
+
+  const handleClientPhotoUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !selectedData) return;
+
+    setSavingPhoto(true);
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      const currentId = selectedData.db_cliente_id ? String(selectedData.db_cliente_id) : null;
+
+      if (currentId) {
+        const updated = await base44.entities.Cliente.update(currentId, { foto_url: file_url });
+        setClientesDb((prev) => prev.map((c) => (String(c.id) === currentId ? { ...c, ...updated } : c)));
+      } else {
+        const created = await base44.entities.Cliente.create({
+          nombre_completo: selectedData.nombre,
+          telefono: selectedData.telefono || "",
+          cedula: selectedData.cedula || "",
+          lugar_procedencia: selectedData.procedencia || "",
+          foto_url: file_url,
+        });
+        setClientesDb((prev) => [...prev, created]);
+      }
+
+      setPhotoOverrides((prev) => ({ ...prev, [selectedData.key]: file_url }));
+    } catch {
+      // Fallback visual local para no bloquear UX si el esquema no tiene foto_url.
+      try {
+        const { file_url } = await base44.integrations.Core.UploadFile({ file });
+        setPhotoOverrides((prev) => ({ ...prev, [selectedData.key]: file_url }));
+      } catch {
+        // No-op: evitamos romper la vista si la subida falla.
+      }
+    } finally {
+      setSavingPhoto(false);
+    }
+  };
 
   const formatTelefono = (val = "") => {
     const digits = val.replace(/\D/g, "").slice(0, 8);
@@ -161,10 +269,10 @@ export default function Clientes() {
               const activos = c.ordenes.filter(o => o.estado_kanban !== "Entregado").length;
               return (
                 <button
-                  key={c.nombre}
-                  onClick={() => setSelected(c.nombre)}
+                  key={c.key}
+                  onClick={() => setSelected(c.key)}
                   className={`w-full text-left rounded-xl border transition-all overflow-hidden ${
-                    selected === c.nombre
+                    selected === c.key
                       ? "bg-primary/10 border-primary"
                       : "bg-card/70 backdrop-blur-md border-white/10 hover:border-primary/40"
                   }`}
@@ -173,8 +281,12 @@ export default function Clientes() {
                   <div className="flex">
                     <div className={`w-1 flex-shrink-0 ${activos > 0 ? "bg-primary" : "bg-border"}`} />
                     <div className="flex items-center gap-3 p-4 flex-1 min-w-0">
-                      <div className="w-10 h-10 rounded-lg bg-secondary/80 border border-white/10 flex items-center justify-center flex-shrink-0">
-                        <User size={16} className="text-muted-foreground" />
+                      <div className="w-10 h-10 rounded-lg bg-secondary/80 border border-white/10 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                        {c.foto_url ? (
+                          <img src={c.foto_url} alt={c.nombre} className="w-full h-full object-cover" />
+                        ) : (
+                          <User size={16} className="text-muted-foreground" />
+                        )}
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="font-heading font-bold text-sm text-foreground truncate uppercase">{c.nombre}</p>
@@ -210,9 +322,29 @@ export default function Clientes() {
               {/* Client info card */}
               <div className="bg-card/70 backdrop-blur-md border border-white/10 rounded-xl p-5 space-y-3">
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-secondary/80 border border-white/10 flex items-center justify-center flex-shrink-0">
-                    <User size={22} className="text-primary" />
+                  <div className="relative w-12 h-12 rounded-xl bg-secondary/80 border border-white/10 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    {selectedData.foto_url ? (
+                      <img src={selectedData.foto_url} alt={selectedData.nombre} className="w-full h-full object-cover" />
+                    ) : (
+                      <User size={22} className="text-primary" />
+                    )}
+                    <button
+                      type="button"
+                      onClick={triggerPhotoPicker}
+                      disabled={savingPhoto}
+                      className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-primary text-primary-foreground border border-background flex items-center justify-center disabled:opacity-60"
+                      title={savingPhoto ? "Subiendo foto..." : "Subir/cambiar foto"}
+                    >
+                      <Camera size={12} />
+                    </button>
                   </div>
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleClientPhotoUpload}
+                  />
                   <div>
                     <h2 className="font-heading font-bold text-2xl uppercase tracking-wide">{selectedData.nombre}</h2>
                     <div className="flex flex-wrap gap-3 mt-2 text-sm">

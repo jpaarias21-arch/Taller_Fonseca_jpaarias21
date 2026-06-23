@@ -6,13 +6,13 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
 import { Search, Pencil, Check, X, Lock, Tag } from "lucide-react";
 import { useRole } from "@/lib/useRole";
+import { formatColones } from "@/lib/utils";
 
 export default function Precios() {
   const { toast } = useToast();
   const { canEditPrices, roleLabel, roleColor } = useRole();
   const isAdmin = canEditPrices;
   const [piezas, setPiezas] = useState([]);
-  const [precios, setPrecios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -20,43 +20,29 @@ export default function Precios() {
 
   useEffect(() => {
     const load = async () => {
-      const [cats, prs] = await Promise.all([
-        base44.entities.PiezaCatalogo.list("nombre", 2000),
-        base44.entities.PrecioPieza.list(),
-      ]);
+      const cats = await base44.entities.PiezaCatalogo.list("nombre", 2000);
       setPiezas(cats);
-      setPrecios(prs);
       setLoading(false);
     };
     load();
   }, []);
 
-  const precioByPiezaId = useMemo(() => {
-    const index = new Map();
-    for (const precio of precios) {
-      index.set(precio.pieza_id, precio);
-    }
-    return index;
-  }, [precios]);
-
-  // Merged list: piezas del catálogo con su precio (si existe)
+  // Las tarifas se leen directamente desde la tabla pieza.
   const merged = useMemo(() => {
     return piezas.map((p) => {
-      const precio = precioByPiezaId.get(p.id);
       return {
         pieza_id: p.id,
         pieza_nombre: p.nombre,
         pieza_categoria: p.categoria,
-        precio_base: precio?.precio_base ?? 0,
-        margen_porcentaje: precio?.margen_porcentaje ?? 0,
-        precio_final: precio?.precio_final ?? 0,
-        precio_hora_dm: precio?.precio_hora_dm ?? 0,
-        precio_hora_reparacion: precio?.precio_hora_reparacion ?? 0,
-        notas: precio?.notas ?? "",
-        _precio_id: precio?.id ?? null,
+        precio_base: p.precio_base ?? 0,
+        margen_porcentaje: p.margen_porcentaje ?? 0,
+        precio_final: p.precio_final ?? 0,
+        precio_hora_dm: p.precio_hora_dm ?? 0,
+        precio_hora_reparacion: p.precio_hora_reparacion ?? 0,
+        notas: p.notas ?? "",
       };
     });
-  }, [piezas, precioByPiezaId]);
+  }, [piezas]);
 
   const searchLower = search.toLowerCase();
 
@@ -116,10 +102,9 @@ export default function Precios() {
       return;
     }
 
+    const piezaId = String(item.pieza_id);
+
     const data = {
-      pieza_id: item.pieza_id,
-      pieza_nombre: item.pieza_nombre,
-      pieza_categoria: item.pieza_categoria,
       precio_base: parseFloat(editForm.precio_base) || 0,
       margen_porcentaje: parseFloat(editForm.margen_porcentaje) || 0,
       precio_final: parseFloat(editForm.precio_final) || 0,
@@ -128,17 +113,19 @@ export default function Precios() {
       notas: editForm.notas || "",
     };
 
-    let saved;
-    if (item._precio_id) {
-      saved = await base44.entities.PrecioPieza.update(item._precio_id, data);
-      setPrecios(prev => prev.map(p => p.id === item._precio_id ? { ...p, ...data } : p));
-    } else {
-      saved = await base44.entities.PrecioPieza.create(data);
-      setPrecios(prev => [...prev, saved]);
-    }
+    try {
+      const saved = await base44.entities.PiezaCatalogo.update(item.pieza_id, data);
+      setPiezas(prev => prev.map(p => String(p.id) === piezaId ? { ...p, ...saved } : p));
 
-    toast({ title: "Precio guardado", description: `${item.pieza_nombre} actualizado.` });
-    setEditingId(null);
+      toast({ title: "Precio guardado", description: `${item.pieza_nombre} actualizado.` });
+      setEditingId(null);
+    } catch (error) {
+      toast({
+        title: "No se pudo guardar",
+        description: error instanceof Error ? error.message : "Intente de nuevo.",
+        variant: "destructive",
+      });
+    }
   };
 
   const cancelEdit = () => { setEditingId(null); setEditForm({}); };
@@ -154,6 +141,7 @@ export default function Precios() {
   }, [filtered]);
 
   const categories = useMemo(() => Object.keys(groupedByCategory).sort(), [groupedByCategory]);
+  const formatCRC = (value) => formatColones(value, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -225,7 +213,7 @@ export default function Precios() {
                           <>
                             <td className="py-2 px-3"><Input type="number" min={0} step="0.01" value={editForm.precio_base} onChange={e => handleEditChange("precio_base", e.target.value)} className="bg-card border-border h-7 text-xs text-right w-24 ml-auto" /></td>
                             <td className="py-2 px-3"><Input type="number" min={0} max={100} step="0.1" value={editForm.margen_porcentaje} onChange={e => handleEditChange("margen_porcentaje", e.target.value)} className="bg-card border-border h-7 text-xs text-right w-20 ml-auto" /></td>
-                            <td className="py-2 px-3 text-right font-bold text-primary text-sm">₡{parseFloat(editForm.precio_final || 0).toFixed(2)}</td>
+                            <td className="py-2 px-3 text-right font-bold text-primary text-sm">{formatCRC(editForm.precio_final || 0)}</td>
                             <td className="py-2 px-3 hidden md:table-cell"><Input type="number" min={0} step="0.01" value={editForm.precio_hora_dm} onChange={e => handleEditChange("precio_hora_dm", e.target.value)} className="bg-card border-border h-7 text-xs text-right w-20 ml-auto" /></td>
                             <td className="py-2 px-3 hidden md:table-cell"><Input type="number" min={0} step="0.01" value={editForm.precio_hora_reparacion} onChange={e => handleEditChange("precio_hora_reparacion", e.target.value)} className="bg-card border-border h-7 text-xs text-right w-20 ml-auto" /></td>
                             <td className="py-2 px-4 text-right">
@@ -237,11 +225,11 @@ export default function Precios() {
                           </>
                         ) : (
                           <>
-                            <td className="py-2.5 px-3 text-right text-muted-foreground">₡{item.precio_base.toFixed(2)}</td>
+                            <td className="py-2.5 px-3 text-right text-muted-foreground">{formatCRC(item.precio_base)}</td>
                             <td className="py-2.5 px-3 text-right text-muted-foreground">{item.margen_porcentaje}%</td>
-                            <td className="py-2.5 px-3 text-right font-bold text-primary">₡{item.precio_final.toFixed(2)}</td>
-                            <td className="py-2.5 px-3 text-right text-muted-foreground hidden md:table-cell">₡{item.precio_hora_dm.toFixed(2)}</td>
-                            <td className="py-2.5 px-3 text-right text-muted-foreground hidden md:table-cell">₡{item.precio_hora_reparacion.toFixed(2)}</td>
+                            <td className="py-2.5 px-3 text-right font-bold text-primary">{formatCRC(item.precio_final)}</td>
+                            <td className="py-2.5 px-3 text-right text-muted-foreground hidden md:table-cell">{formatCRC(item.precio_hora_dm)}</td>
+                            <td className="py-2.5 px-3 text-right text-muted-foreground hidden md:table-cell">{formatCRC(item.precio_hora_reparacion)}</td>
                             {isAdmin && (
                               <td className="py-2.5 px-4 text-right">
                                 <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground hover:text-primary gap-1" onClick={() => startEdit(item)}>

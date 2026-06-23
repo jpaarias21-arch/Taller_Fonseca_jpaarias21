@@ -8,15 +8,39 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useToast } from "@/components/ui/use-toast";
 import { Plus, Search, Wrench, Pencil, Lock } from "lucide-react";
 import { useRole } from "@/lib/useRole";
+import { formatColones } from "@/lib/utils";
 
 const CATEGORIAS = [
   "Carrocería Frontal", "Carrocería Lateral", "Carrocería Trasera",
   "Techo y Piso", "Iluminación", "Vidrios", "Mecánica Visible", "Interior"
 ];
 
+const sanitizeCurrencyInput = (value) => String(value ?? "").replace(/[^\d]/g, "");
+
+const formatCurrencyInput = (value) => {
+  const sanitized = sanitizeCurrencyInput(value);
+  if (!sanitized) return "";
+  return formatColones(Number(sanitized), { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+};
+
+const buildPiezaForm = (data = {}) => {
+  const safeData = data && typeof data === "object" ? data : {};
+  return {
+    ...safeData,
+    nombre: safeData.nombre ?? "",
+    categoria: safeData.categoria ?? "Carrocería Frontal",
+    codigo: safeData.codigo ?? "",
+    proveedor: safeData.proveedor ?? "",
+    costo: safeData.costo ?? "",
+    precio: safeData.precio ?? "",
+  };
+};
+
 function PiezaModal({ open, onClose, onSave, initial }) {
-  const [form, setForm] = useState(initial || { nombre: "", categoria: "Carrocería Frontal", codigo: "" });
-  useEffect(() => { if (initial) setForm(initial); else setForm({ nombre: "", categoria: "Carrocería Frontal", codigo: "" }); }, [initial]);
+  const [form, setForm] = useState(buildPiezaForm(initial));
+  useEffect(() => {
+    setForm(buildPiezaForm(initial));
+  }, [initial, open]);
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -42,6 +66,34 @@ function PiezaModal({ open, onClose, onSave, initial }) {
             <label className="form-label">Código Interno</label>
             <Input value={form.codigo} onChange={e => setForm(f => ({ ...f, codigo: e.target.value }))} className="bg-secondary border-border" placeholder="P-001" />
           </div>
+          <div>
+            <label className="form-label">Proveedor</label>
+            <Input value={form.proveedor} onChange={e => setForm(f => ({ ...f, proveedor: e.target.value }))} className="bg-secondary border-border" placeholder="Ej: Repuestos del Valle" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="form-label">Costo (₡)</label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                value={formatCurrencyInput(form.costo)}
+                onChange={e => setForm(f => ({ ...f, costo: sanitizeCurrencyInput(e.target.value) }))}
+                className="bg-secondary border-border"
+                placeholder="₡0"
+              />
+            </div>
+            <div>
+              <label className="form-label">Precio (₡)</label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                value={formatCurrencyInput(form.precio)}
+                onChange={e => setForm(f => ({ ...f, precio: sanitizeCurrencyInput(e.target.value) }))}
+                className="bg-secondary border-border"
+                placeholder="₡0"
+              />
+            </div>
+          </div>
           <div className="flex gap-3 justify-end pt-2">
             <Button variant="outline" className="border-border" onClick={onClose}>Cancelar</Button>
             <Button className="bg-primary text-primary-foreground" onClick={() => onSave(form)} disabled={!form.nombre}>
@@ -65,10 +117,23 @@ export default function Catalogo() {
   const [editPieza, setEditPieza] = useState(null);
 
   useEffect(() => {
-    base44.entities.PiezaCatalogo.list().then(data => {
-      setPiezas(data);
-      setLoading(false);
-    });
+    const loadPiezas = async () => {
+      try {
+        const data = await base44.entities.PiezaCatalogo.list();
+        setPiezas(Array.isArray(data) ? data : []);
+      } catch (error) {
+        setPiezas([]);
+        toast({
+          title: "No se pudo cargar el catálogo",
+          description: error?.message || "Intente nuevamente.",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadPiezas();
   }, []);
 
   const savePieza = async (form) => {
@@ -76,6 +141,9 @@ export default function Catalogo() {
       nombre: (form.nombre || "").trim(),
       categoria: form.categoria,
       codigo: (form.codigo || "").trim(),
+      proveedor: (form.proveedor || "").trim(),
+      costo: Number(sanitizeCurrencyInput(form.costo) || 0),
+      precio: Number(sanitizeCurrencyInput(form.precio) || 0),
       ...(form.id ? { id: form.id } : {}),
     };
 
@@ -128,7 +196,9 @@ export default function Catalogo() {
 
   const filtered = useMemo(() => {
     return piezas.filter((p) => {
-      const match = p.nombre?.toLowerCase().includes(searchLower) || p.codigo?.toLowerCase().includes(searchLower);
+      const nombre = String(p?.nombre ?? "").toLowerCase();
+      const codigo = String(p?.codigo ?? "").toLowerCase();
+      const match = nombre.includes(searchLower) || codigo.includes(searchLower);
       const matchCat = filterCat === "todas" || p.categoria === filterCat;
       return match && matchCat;
     });

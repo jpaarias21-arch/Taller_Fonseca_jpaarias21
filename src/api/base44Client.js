@@ -227,9 +227,36 @@ const buildEntityApi = (entityName) => {
 	};
 };
 
+const normalizeRole = (rawRole) => {
+	if (typeof rawRole !== "string") return "user";
+	const normalized = rawRole
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.trim()
+		.toLowerCase();
+
+	const roleAliases = {
+		admin: "admin",
+		administrador: "admin",
+		dueño: "admin",
+		dueno: "admin",
+		owner: "admin",
+		gerente: "gerente",
+		manager: "gerente",
+		empleado: "empleado",
+		tecnico: "empleado",
+		user: "user",
+		usuario: "user",
+		secretaria: "user"
+	};
+
+	return roleAliases[normalized] || "user";
+};
+
 const normalizeUser = (user) => {
 	if (!user) return null;
-	const role = user.user_metadata?.role || user.app_metadata?.role || "user";
+	const roleRaw = user.user_metadata?.role || user.app_metadata?.role || "user";
+	const role = normalizeRole(roleRaw);
 	return {
 		...user,
 		role,
