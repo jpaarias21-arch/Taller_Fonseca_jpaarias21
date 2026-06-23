@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
@@ -249,34 +250,64 @@ export default function NuevaOrden() {
 
     setSaving(true);
     const numeroOrden = `OT-${Date.now().toString().slice(-6)}`;
-    const ordenData = {
-      ...form,
-      numero_orden: numeroOrden,
-      kilometraje: Number(form.kilometraje) || 0,
-      anio: Number(form.anio),
-      monto_autorizado_seguro: Number(form.monto_autorizado_seguro) || 0,
-      adelanto_dinero: Number(form.adelanto_dinero) || 0,
-      fotos,
-      estado_cotizacion: "Borrador",
-      estado_kanban: "Recepción",
-      historial_kanban: [{ estacion: "Recepción", fecha: new Date().toISOString(), tecnico: form.evaluador_nombre || "Sistema" }],
-    };
 
-    const orden = await base44.entities.OrdenTrabajo.create(ordenData);
+    try {
+      const ordenData = {
+        ...form,
+        numero_orden: numeroOrden,
+        kilometraje: Number(form.kilometraje) || 0,
+        anio: Number(form.anio),
+        monto_autorizado_seguro: Number(form.monto_autorizado_seguro) || 0,
+        adelanto_dinero: Number(form.adelanto_dinero) || 0,
+        fotos,
+        estado_cotizacion: "Borrador",
+        estado_kanban: "Recepción",
+        historial_kanban: [{ estacion: "Recepción", fecha: new Date().toISOString(), tecnico: form.evaluador_nombre || "Sistema" }],
+      };
 
-    // Create lineas
-    for (const linea of lineas) {
-      const subtotal = (linea.horas_dm * 15) + (linea.horas_reparacion * 20) + (linea.costo_pintura || 0) + (linea.costo_repuesto || 0);
-      await base44.entities.LineaAvaluo.create({
-        ...linea,
-        orden_id: orden.id,
-        subtotal,
-        es_ampliacion: false,
+      const orden = await base44.entities.OrdenTrabajo.create(ordenData);
+
+      const lineResults = await Promise.allSettled(
+        lineas.map((linea) => {
+          const subtotal =
+            linea.horas_dm * 15 +
+            linea.horas_reparacion * 20 +
+            (linea.costo_pintura || 0) +
+            (linea.costo_repuesto || 0);
+
+          return base44.entities.LineaAvaluo.create({
+            ...linea,
+            orden_id: orden.id,
+            subtotal,
+            es_ampliacion: false,
+          });
+        })
+      );
+
+      const failedLines = lineResults.filter((result) => result.status === "rejected");
+
+      if (failedLines.length > 0) {
+        console.error("Error creando lineas de avaluo:", failedLines);
+        toast({
+          title: "Orden creada con advertencias",
+          description: `${numeroOrden} se guardó, pero ${failedLines.length} línea(s) no pudieron registrarse.`,
+          variant: "destructive"
+        });
+      } else {
+        toast({ title: "Orden creada", description: `${numeroOrden} registrada exitosamente.` });
+      }
+
+      navigate(`/ordenes/${orden.id}`);
+    } catch (error) {
+      console.error("Error guardando orden:", error);
+      toast({
+        title: "No se pudo guardar la orden",
+        description: error instanceof Error ? error.message : "Ocurrió un problema al guardar la orden.",
+        variant: "destructive"
       });
+    } finally {
+      setSaving(false);
     }
-
-    toast({ title: "Orden creada", description: `${numeroOrden} registrada exitosamente.` });
-    navigate(`/ordenes/${orden.id}`);
   };
 
   return (

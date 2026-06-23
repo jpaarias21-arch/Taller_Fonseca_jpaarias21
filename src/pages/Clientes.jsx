@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+// @ts-nocheck
+import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { Input } from "@/components/ui/input";
@@ -19,33 +20,42 @@ export default function Clientes() {
   }, []);
 
   // Group by client name (normalized)
-  const clientes = {};
-  ordenes.forEach(o => {
-    const key = o.cliente_nombre?.toLowerCase().trim();
-    if (!key) return;
-    if (!clientes[key]) {
-      clientes[key] = {
-        nombre: o.cliente_nombre,
-        telefono: o.cliente_telefono,
-        cedula: o.cliente_cedula,
-        procedencia: o.lugar_procedencia,
-        ordenes: [],
-      };
-    }
-    clientes[key].ordenes.push(o);
-  });
+  const clientes = useMemo(() => {
+    const grouped = {};
+    ordenes.forEach((o) => {
+      const key = o.cliente_nombre?.toLowerCase().trim();
+      if (!key) return;
+      if (!grouped[key]) {
+        grouped[key] = {
+          nombre: o.cliente_nombre,
+          telefono: o.cliente_telefono,
+          cedula: o.cliente_cedula,
+          procedencia: o.lugar_procedencia,
+          ordenes: [],
+        };
+      }
+      grouped[key].ordenes.push(o);
+    });
+    return grouped;
+  }, [ordenes]);
 
-  const clientesList = Object.values(clientes).filter(c => {
-    const q = search.toLowerCase();
-    return (
-      c.nombre?.toLowerCase().includes(q) ||
-      c.telefono?.includes(q) ||
-      c.cedula?.includes(q) ||
-      c.ordenes.some(o => o.placa?.toLowerCase().includes(q))
-    );
-  });
+  const searchLower = search.toLowerCase();
 
-  const selectedData = selected ? clientes[selected.toLowerCase().trim()] : null;
+  const clientesList = useMemo(() => {
+    return Object.values(clientes).filter((c) => {
+      return (
+        c.nombre?.toLowerCase().includes(searchLower) ||
+        c.telefono?.includes(searchLower) ||
+        c.cedula?.includes(searchLower) ||
+        c.ordenes.some((o) => o.placa?.toLowerCase().includes(searchLower))
+      );
+    });
+  }, [clientes, searchLower]);
+
+  const selectedData = useMemo(
+    () => (selected ? clientes[selected.toLowerCase().trim()] : null),
+    [clientes, selected]
+  );
 
   const formatTelefono = (val = "") => {
     const digits = val.replace(/\D/g, "").slice(0, 8);
@@ -61,9 +71,12 @@ export default function Clientes() {
   };
 
   // Stats
-  const totalClientes = Object.keys(clientes).length;
-  const enTaller = ordenes.filter(o => o.estado_kanban !== "Entregado").length;
-  const pendientes = ordenes.filter(o => o.estado_cotizacion === "Borrador" || o.estado_cotizacion === "Enviado").length;
+  const totalClientes = useMemo(() => Object.keys(clientes).length, [clientes]);
+  const enTaller = useMemo(() => ordenes.filter((o) => o.estado_kanban !== "Entregado").length, [ordenes]);
+  const pendientes = useMemo(
+    () => ordenes.filter((o) => o.estado_cotizacion === "Borrador" || o.estado_cotizacion === "Enviado").length,
+    [ordenes]
+  );
 
   const getKanbanColor = (estado) => {
     const map = {

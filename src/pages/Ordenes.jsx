@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+// @ts-nocheck
+import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { Plus, Search, Car, Filter, ArrowRight } from "lucide-react";
@@ -52,16 +53,19 @@ export default function Ordenes() {
     });
   }, []);
 
-  const filtered = ordenes.filter(o => {
-    const q = search.toLowerCase();
-    const matchSearch =
-      o.placa?.toLowerCase().includes(q) ||
-      o.cliente_nombre?.toLowerCase().includes(q) ||
-      o.marca?.toLowerCase().includes(q) ||
-      o.numero_orden?.toLowerCase().includes(q);
-    const matchEstado = filterEstado === "todos" || o.estado_cotizacion === filterEstado;
-    return matchSearch && matchEstado;
-  });
+  const searchLower = search.toLowerCase();
+
+  const filtered = useMemo(() => {
+    return ordenes.filter((o) => {
+      const matchSearch =
+        o.placa?.toLowerCase().includes(searchLower) ||
+        o.cliente_nombre?.toLowerCase().includes(searchLower) ||
+        o.marca?.toLowerCase().includes(searchLower) ||
+        o.numero_orden?.toLowerCase().includes(searchLower);
+      const matchEstado = filterEstado === "todos" || o.estado_cotizacion === filterEstado;
+      return matchSearch && matchEstado;
+    });
+  }, [ordenes, searchLower, filterEstado]);
 
   return (
     <div className="space-y-6 animate-fade-in">

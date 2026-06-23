@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+// @ts-nocheck
+import { useState, useEffect, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -94,18 +95,25 @@ export default function Catalogo() {
     setPiezas(prev => prev.map(p => p.id === pieza.id ? { ...p, activo: !p.activo } : p));
   };
 
-  const filtered = piezas.filter(p => {
-    const q = search.toLowerCase();
-    const match = p.nombre?.toLowerCase().includes(q) || p.codigo?.toLowerCase().includes(q);
-    const matchCat = filterCat === "todas" || p.categoria === filterCat;
-    return match && matchCat;
-  });
+  const searchLower = search.toLowerCase();
 
-  const grouped = CATEGORIAS.reduce((acc, cat) => {
-    const items = filtered.filter(p => p.categoria === cat);
-    if (items.length > 0) acc[cat] = items;
-    return acc;
-  }, {});
+  const filtered = useMemo(() => {
+    return piezas.filter((p) => {
+      const match = p.nombre?.toLowerCase().includes(searchLower) || p.codigo?.toLowerCase().includes(searchLower);
+      const matchCat = filterCat === "todas" || p.categoria === filterCat;
+      return match && matchCat;
+    });
+  }, [piezas, searchLower, filterCat]);
+
+  const grouped = useMemo(() => {
+    return CATEGORIAS.reduce((acc, cat) => {
+      const items = filtered.filter((p) => p.categoria === cat);
+      if (items.length > 0) acc[cat] = items;
+      return acc;
+    }, {});
+  }, [filtered]);
+
+  const piezasActivas = useMemo(() => piezas.filter((p) => p.activo).length, [piezas]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -113,7 +121,7 @@ export default function Catalogo() {
         <div>
           <h1 className="text-3xl font-heading font-bold uppercase tracking-wide">Catálogo de Piezas</h1>
           <p className="text-muted-foreground text-sm">
-            Maestro estandarizado — {piezas.filter(p => p.activo).length} piezas activas
+            Maestro estandarizado — {piezasActivas} piezas activas
           </p>
         </div>
         {canManageCatalog ? (

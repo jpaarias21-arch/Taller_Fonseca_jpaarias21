@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+// @ts-nocheck
+import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { useToast } from "@/components/ui/use-toast";
@@ -153,6 +154,19 @@ export default function Kanban() {
     ).filter(o => o.estado_kanban !== "Entregado"));
   };
 
+  const cardsByStation = useMemo(() => {
+    const grouped = {};
+    for (const station of STATIONS) grouped[station.id] = [];
+    for (const orden of ordenes) {
+      const station = orden.estado_kanban;
+      if (!station || !grouped[station]) continue;
+      grouped[station].push(orden);
+    }
+    return grouped;
+  }, [ordenes]);
+
+  const entregados = useMemo(() => cardsByStation["Entregado"] || [], [cardsByStation]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -172,7 +186,7 @@ export default function Kanban() {
       <div className="overflow-x-auto pb-4">
         <div className="flex gap-4 min-w-max">
           {STATIONS.filter(s => s.id !== "Entregado").map(station => {
-            const cards = ordenes.filter(o => o.estado_kanban === station.id);
+            const cards = cardsByStation[station.id] || [];
             return (
               <div key={station.id} className="w-64 flex-shrink-0">
                 {/* Column header */}
@@ -203,7 +217,7 @@ export default function Kanban() {
           Vehículos Entregados
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {ordenes.filter(o => o.estado_kanban === "Entregado").map(o => (
+          {entregados.map(o => (
             <Link key={o.id} to={`/ordenes/${o.id}`} className="flex items-center gap-3 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/15 transition-colors">
               <Car size={14} className="text-emerald-400 flex-shrink-0" />
               <div>
@@ -212,7 +226,7 @@ export default function Kanban() {
               </div>
             </Link>
           ))}
-          {ordenes.filter(o => o.estado_kanban === "Entregado").length === 0 && (
+          {entregados.length === 0 && (
             <p className="text-muted-foreground text-sm col-span-3">Ningún vehículo entregado hoy</p>
           )}
         </div>

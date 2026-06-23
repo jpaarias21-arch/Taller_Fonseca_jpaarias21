@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+// @ts-nocheck
+import { useState, useEffect, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -39,18 +40,25 @@ export default function Compras() {
     setUpdating(null);
   };
 
-  const filtered = reqs.filter(r => {
-    const q = search.toLowerCase();
-    const matchSearch = r.pieza_nombre?.toLowerCase().includes(q) || r.numero_orden?.toLowerCase().includes(q);
-    const matchEstado = filterEstado === "todos" || r.estado === filterEstado;
-    return matchSearch && matchEstado;
-  });
+  const searchLower = search.toLowerCase();
 
-  const stats = {
-    pendiente: reqs.filter(r => r.estado === "Pendiente").length,
-    ordenado: reqs.filter(r => r.estado === "Ordenado").length,
-    recibido: reqs.filter(r => r.estado === "Recibido").length,
-  };
+  const filtered = useMemo(() => {
+    return reqs.filter((r) => {
+      const matchSearch =
+        r.pieza_nombre?.toLowerCase().includes(searchLower) ||
+        r.numero_orden?.toLowerCase().includes(searchLower);
+      const matchEstado = filterEstado === "todos" || r.estado === filterEstado;
+      return matchSearch && matchEstado;
+    });
+  }, [reqs, searchLower, filterEstado]);
+
+  const stats = useMemo(() => {
+    return {
+      pendiente: reqs.filter((r) => r.estado === "Pendiente").length,
+      ordenado: reqs.filter((r) => r.estado === "Ordenado").length,
+      recibido: reqs.filter((r) => r.estado === "Recibido").length,
+    };
+  }, [reqs]);
 
   return (
     <div className="space-y-6 animate-fade-in">

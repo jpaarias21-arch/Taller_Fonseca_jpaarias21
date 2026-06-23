@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+// @ts-nocheck
+import { useState, useEffect, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -236,17 +237,35 @@ export default function Inventario() {
     setModalMov(null);
   };
 
-  const filtered = productos.filter(p => {
-    const q = search.toLowerCase();
-    const match = p.nombre?.toLowerCase().includes(q) || p.codigo?.toLowerCase().includes(q);
-    const matchTipo = filterTipo === "todos" || p.tipo === filterTipo;
-    return match && matchTipo;
-  });
+  const searchLower = search.toLowerCase();
 
-  const bajoStock = productos.filter(p => p.stock_actual <= p.stock_minimo);
-  const totalValor = productos.reduce((acc, p) => acc + (p.stock_actual * (p.precio_unitario || 0)), 0);
-  const repuestos = productos.filter(p => p.tipo === "Repuesto Físico").length;
-  const consumibles = productos.filter(p => p.tipo === "Consumible Químico").length;
+  const filtered = useMemo(() => {
+    return productos.filter((p) => {
+      const match = p.nombre?.toLowerCase().includes(searchLower) || p.codigo?.toLowerCase().includes(searchLower);
+      const matchTipo = filterTipo === "todos" || p.tipo === filterTipo;
+      return match && matchTipo;
+    });
+  }, [productos, searchLower, filterTipo]);
+
+  const bajoStock = useMemo(
+    () => productos.filter((p) => p.stock_actual <= p.stock_minimo),
+    [productos]
+  );
+
+  const totalValor = useMemo(
+    () => productos.reduce((acc, p) => acc + p.stock_actual * (p.precio_unitario || 0), 0),
+    [productos]
+  );
+
+  const repuestos = useMemo(
+    () => productos.filter((p) => p.tipo === "Repuesto Físico").length,
+    [productos]
+  );
+
+  const consumibles = useMemo(
+    () => productos.filter((p) => p.tipo === "Consumible Químico").length,
+    [productos]
+  );
 
   return (
     <div className="space-y-6 animate-fade-in">

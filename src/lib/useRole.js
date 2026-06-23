@@ -1,5 +1,8 @@
 import { useAuth } from "@/lib/AuthContext";
 
+/** @typedef {"admin" | "gerente" | "user" | "empleado"} RoleKey */
+
+/** @type {Record<RoleKey, string>} */
 export const ROLE_LABELS = {
   admin: "Dueño",
   gerente: "Gerente",
@@ -7,6 +10,7 @@ export const ROLE_LABELS = {
   empleado: "Empleado",
 };
 
+/** @type {Record<RoleKey, string>} */
 export const ROLE_COLORS = {
   admin: "bg-yellow-500/20 text-yellow-400 border-yellow-500/40",
   gerente: "bg-blue-500/20 text-blue-400 border-blue-500/40",
@@ -15,8 +19,13 @@ export const ROLE_COLORS = {
 };
 
 export function useRole() {
-  const { user } = useAuth();
-  const role = user?.role || "user";
+  const { user } = /** @type {{ user: { role?: string } | null }} */ (useAuth());
+  const userRecord = user && typeof user === "object" ? /** @type {Record<string, unknown>} */ (user) : null;
+  const rawRole = userRecord?.role;
+  const role =
+    typeof rawRole === "string" && rawRole in ROLE_LABELS
+      ? /** @type {RoleKey} */ (rawRole)
+      : "user";
   const isAdmin = role === "admin";
   const isGerente = role === "gerente";
   const isEmpleado = role === "empleado";

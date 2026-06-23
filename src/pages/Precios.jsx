@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+// @ts-nocheck
+import { useState, useEffect, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,27 +31,41 @@ export default function Precios() {
     load();
   }, []);
 
-  // Merged list: piezas del catálogo con su precio (si existe)
-  const merged = piezas.map(p => {
-    const precio = precios.find(pr => pr.pieza_id === p.id);
-    return {
-      pieza_id: p.id,
-      pieza_nombre: p.nombre,
-      pieza_categoria: p.categoria,
-      precio_base: precio?.precio_base ?? 0,
-      margen_porcentaje: precio?.margen_porcentaje ?? 0,
-      precio_final: precio?.precio_final ?? 0,
-      precio_hora_dm: precio?.precio_hora_dm ?? 0,
-      precio_hora_reparacion: precio?.precio_hora_reparacion ?? 0,
-      notas: precio?.notas ?? "",
-      _precio_id: precio?.id ?? null,
-    };
-  });
+  const precioByPiezaId = useMemo(() => {
+    const index = new Map();
+    for (const precio of precios) {
+      index.set(precio.pieza_id, precio);
+    }
+    return index;
+  }, [precios]);
 
-  const filtered = merged.filter(p =>
-    p.pieza_nombre.toLowerCase().includes(search.toLowerCase()) ||
-    p.pieza_categoria?.toLowerCase().includes(search.toLowerCase())
-  );
+  // Merged list: piezas del catálogo con su precio (si existe)
+  const merged = useMemo(() => {
+    return piezas.map((p) => {
+      const precio = precioByPiezaId.get(p.id);
+      return {
+        pieza_id: p.id,
+        pieza_nombre: p.nombre,
+        pieza_categoria: p.categoria,
+        precio_base: precio?.precio_base ?? 0,
+        margen_porcentaje: precio?.margen_porcentaje ?? 0,
+        precio_final: precio?.precio_final ?? 0,
+        precio_hora_dm: precio?.precio_hora_dm ?? 0,
+        precio_hora_reparacion: precio?.precio_hora_reparacion ?? 0,
+        notas: precio?.notas ?? "",
+        _precio_id: precio?.id ?? null,
+      };
+    });
+  }, [piezas, precioByPiezaId]);
+
+  const searchLower = search.toLowerCase();
+
+  const filtered = useMemo(() => {
+    return merged.filter((p) =>
+      p.pieza_nombre.toLowerCase().includes(searchLower) ||
+      p.pieza_categoria?.toLowerCase().includes(searchLower)
+    );
+  }, [merged, searchLower]);
 
   const startEdit = (item) => {
     setEditingId(item.pieza_id);
@@ -112,7 +127,16 @@ export default function Precios() {
   const cancelEdit = () => { setEditingId(null); setEditForm({}); };
 
   // Grouped by category
-  const categories = [...new Set(filtered.map(p => p.pieza_categoria))].sort();
+  const groupedByCategory = useMemo(() => {
+    return filtered.reduce((acc, item) => {
+      const key = item.pieza_categoria || "Sin categoría";
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(item);
+      return acc;
+    }, {});
+  }, [filtered]);
+
+  const categories = useMemo(() => Object.keys(groupedByCategory).sort(), [groupedByCategory]);
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -151,7 +175,7 @@ export default function Precios() {
 
       {/* Table by category */}
       {categories.map(cat => {
-        const items = filtered.filter(p => p.pieza_categoria === cat);
+        const items = groupedByCategory[cat] || [];
         return (
           <div key={cat} className="data-card p-0 overflow-hidden">
             {/* Category header */}
