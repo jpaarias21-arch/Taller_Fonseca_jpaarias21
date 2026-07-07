@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Package, Plus, Search, AlertTriangle, TrendingDown, Boxes, DollarSign, Lock, Upload } from "lucide-react";
+import { Package, Plus, Search, AlertTriangle, TrendingDown, Boxes, DollarSign, Lock, Upload, Download } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { formatColones } from "@/lib/utils";
 import * as XLSX from "xlsx";
@@ -460,6 +460,16 @@ export default function Inventario() {
               onChange={handleExcelImport}
             />
             <Button
+              asChild
+              type="button"
+              variant="outline"
+              className="border-border font-semibold gap-2 uppercase tracking-wide"
+            >
+              <a href="/plantilla-catalogo-piezas.xlsx" download>
+                <Download size={16} /> Descargar plantilla
+              </a>
+            </Button>
+            <Button
               type="button"
               variant="outline"
               onClick={triggerImport}
@@ -479,6 +489,12 @@ export default function Inventario() {
           </div>
         )}
       </div>
+
+      {canManageInventory && (
+        <p className="text-sm text-muted-foreground">
+          Descarga la plantilla de Excel, completa los productos y luego usa Cargar Excel para importarlos más rápido.
+        </p>
+      )}
 
       {/* Stats Bento */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

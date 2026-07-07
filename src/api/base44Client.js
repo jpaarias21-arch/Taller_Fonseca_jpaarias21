@@ -447,7 +447,7 @@ const integrations = {
 	}
 };
 
-export const apiClient = {
+export const base44 = {
 	entities: {
 		OrdenTrabajo: buildEntityApi("OrdenTrabajo"),
 		LineaAvaluo: buildEntityApi("LineaAvaluo"),
@@ -464,6 +464,3 @@ export const apiClient = {
 	auth,
 	integrations
 };
-
-// Alias de compatibilidad para no romper imports existentes.
-export const base44 = apiClient;

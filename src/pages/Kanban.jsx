@@ -2,18 +2,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
+import { OrdenTrabajoAPI } from "@/api/OrdenTrabajo";
 import { WhatsAppAPI } from "@/api/WhatsApp";
 import { useToast } from "@/components/ui/use-toast";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { StatusChangeWhatsappModal } from "@/components/StatusChangeWhatsappModal";
 import { Car, AlertTriangle, Shield, User, Eye, X } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { buildStatusWhatsAppMessage, normalizeWhatsAppPhone } from "@/lib/whatsapp";
@@ -37,67 +29,87 @@ function KanbanCard({ orden, onMove }) {
   const { toast } = useToast();
   const { canMoveKanban } = useRole();
   const [blocked, setBlocked] = useState(false);
-  const [waConfirmOpen, setWaConfirmOpen] = useState(false);
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [pendingStatus, setPendingStatus] = useState("");
   const [pendingMessage, setPendingMessage] = useState("");
-  const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
+  const [pendingHistorial, setPendingHistorial] = useState([]);
+  const [submittingStatusChange, setSubmittingStatusChange] = useState(false);
   const currentIdx = STATIONS.findIndex(s => s.id === orden.estado_kanban);
   const isApproved = orden.estado_cotizacion === "Aprobado" || orden.estado_cotizacion === "Autorizado por Seguro";
 
   const hasWhatsappPhone = Boolean(normalizeWhatsAppPhone(orden?.cliente_telefono));
 
-  const copyMessageToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(pendingMessage);
-      setWaConfirmOpen(false);
-      toast({
-        title: "Mensaje copiado",
-        description: "La notificación quedó copiada para compartirla al cliente."
-      });
-    } catch {
-      toast({
-        title: "No se pudo copiar",
-        description: "Intente nuevamente. Si persiste, copie manualmente el texto.",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const sendMessageAutomatically = async () => {
+  const confirmStatusChange = async () => {
     const phone = normalizeWhatsAppPhone(orden?.cliente_telefono);
     if (!phone) {
       toast({
-        title: "No se pudo enviar",
+        title: "No se pudo confirmar",
         description: "Falta teléfono del cliente.",
         variant: "destructive"
       });
       return;
     }
 
-    try {
-      setSendingWhatsapp(true);
-      await WhatsAppAPI.enviarEstatus({
-        to: phone,
-        message: pendingMessage,
-        order_id: orden?.id,
-        estado: pendingStatus,
-        placa: orden?.placa,
-        cliente: orden?.cliente_nombre
-      });
-
-      setWaConfirmOpen(false);
+    if (!pendingStatus) {
       toast({
-        title: "Mensaje enviado",
-        description: "El cliente fue notificado automáticamente por WhatsApp."
+        title: "No se pudo confirmar",
+        description: "No hay una estación seleccionada para actualizar.",
+        variant: "destructive"
       });
+      return;
+    }
+
+    try {
+      setSubmittingStatusChange(true);
+
+      let updatedOrder = null;
+      try {
+        updatedOrder = await OrdenTrabajoAPI.actualizarEstatusKanbanConHistorial(orden.id, pendingStatus, pendingHistorial);
+      } catch {
+        updatedOrder = await base44.entities.OrdenTrabajo.update(orden.id, {
+          estado_kanban: pendingStatus,
+          historial_kanban: pendingHistorial
+        });
+      }
+
+      onMove(orden.id, pendingStatus, pendingHistorial, updatedOrder);
+
+      try {
+        await WhatsAppAPI.enviarEstatus({
+          to: phone,
+          message: pendingMessage,
+          mode: "text",
+          provider: "meta",
+          order_id: orden?.id,
+          estado: pendingStatus,
+          placa: orden?.placa,
+          cliente: orden?.cliente_nombre
+        });
+
+        toast({
+          title: "Estatus actualizado",
+          description: "El estado se actualizó y el cliente fue notificado por WhatsApp."
+        });
+      } catch (error) {
+        toast({
+          title: "Estatus actualizado con aviso",
+          description: `Se actualizó el estado, pero no se pudo enviar WhatsApp: ${error?.message || "Error no identificado."}`,
+          variant: "destructive"
+        });
+      }
+
+      setStatusModalOpen(false);
+      setPendingStatus("");
+      setPendingMessage("");
+      setPendingHistorial([]);
     } catch (error) {
       toast({
-        title: "Error enviando WhatsApp",
-        description: error?.message || "No fue posible enviar el mensaje automático.",
+        title: "Error al confirmar el cambio",
+        description: error?.message || "No fue posible actualizar el estado.",
         variant: "destructive"
       });
     } finally {
-      setSendingWhatsapp(false);
+      setSubmittingStatusChange(false);
     }
   };
 
@@ -113,24 +125,19 @@ function KanbanCard({ orden, onMove }) {
       fecha: new Date().toISOString(),
       tecnico: orden.tecnico_actual_nombre || "Sistema"
     }];
-    await base44.entities.OrdenTrabajo.update(orden.id, {
-      estado_kanban: next,
-      historial_kanban: historial
-    });
 
     if (!hasWhatsappPhone) {
       toast({
-        title: "Estado actualizado",
-        description: "No se pudo preparar WhatsApp: falta teléfono del cliente.",
+        title: "Movimiento bloqueado",
+        description: "No se puede confirmar el cambio porque el cliente no tiene teléfono para WhatsApp.",
         variant: "destructive"
       });
     } else {
       setPendingStatus(next);
       setPendingMessage(buildStatusWhatsAppMessage(orden, next));
-      setWaConfirmOpen(true);
+      setPendingHistorial(historial);
+      setStatusModalOpen(true);
     }
-
-    onMove(orden.id, next, historial);
   };
 
   const stationInfo = STATIONS.find(s => s.id === orden.estado_kanban);
@@ -220,27 +227,24 @@ function KanbanCard({ orden, onMove }) {
         </div>
       )}
 
-      <AlertDialog open={waConfirmOpen} onOpenChange={setWaConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Notificar al cliente por WhatsApp</AlertDialogTitle>
-            <AlertDialogDescription>
-              El vehículo se movió a <span className="font-semibold text-foreground">{pendingStatus}</span>.
-              Revise y copie el mensaje para enviarlo sin salir de la app.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="rounded-md border border-border bg-secondary/30 p-3 text-sm whitespace-pre-wrap">
-            {pendingMessage}
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>No enviar</AlertDialogCancel>
-            <Button variant="outline" onClick={copyMessageToClipboard} disabled={sendingWhatsapp}>Copiar mensaje</Button>
-            <Button onClick={sendMessageAutomatically} disabled={sendingWhatsapp}>
-              {sendingWhatsapp ? "Enviando..." : "Enviar automático"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <StatusChangeWhatsappModal
+        open={statusModalOpen}
+        onOpenChange={(open) => {
+          setStatusModalOpen(open);
+          if (!open && !submittingStatusChange) {
+            setPendingStatus("");
+            setPendingMessage("");
+            setPendingHistorial([]);
+          }
+        }}
+        stage={pendingStatus}
+        message={pendingMessage}
+        onMessageChange={setPendingMessage}
+        onConfirm={confirmStatusChange}
+        isSubmitting={submittingStatusChange}
+        disableConfirm={!pendingStatus || !pendingMessage?.trim() || !hasWhatsappPhone}
+        disableReason={!hasWhatsappPhone ? "Este cliente no tiene teléfono válido para WhatsApp." : ""}
+      />
     </div>
   );
 }

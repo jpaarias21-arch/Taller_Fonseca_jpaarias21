@@ -1,17 +1,6 @@
-const DEFAULT_COUNTRY_CODE = "506";
+import { getStatusMessage } from "@/messageTemplates";
 
-const STATUS_TEMPLATE = {
-  "Recepción": "Tu vehículo fue recibido correctamente y ya está en nuestro proceso interno.",
-  "Espera de Autorización": "Estamos a la espera de autorización para continuar con los trabajos.",
-  "Desarmado": "Iniciamos la etapa de desarmado para inspección y reparación.",
-  "Enderezado": "El vehículo se encuentra en proceso de enderezado de estructura y piezas.",
-  "Preparación": "Estamos preparando superficie y componentes para pintura.",
-  "Cabina de Pintura": "Tu vehículo ingresó a cabina de pintura.",
-  "Armado": "Estamos en etapa de armado y reinstalación de componentes.",
-  "Pulido": "Tu vehículo está en proceso de acabados y pulido.",
-  "Control de Calidad": "Estamos realizando revisión final de calidad.",
-  "Entregado": "Tu vehículo está listo para entrega. Gracias por confiar en nosotros."
-};
+const DEFAULT_COUNTRY_CODE = "506";
 
 export function normalizeWhatsAppPhone(rawPhone) {
   const digits = String(rawPhone || "").replace(/\D/g, "");
@@ -24,17 +13,24 @@ export function normalizeWhatsAppPhone(rawPhone) {
 }
 
 export function buildStatusWhatsAppMessage(orden, nuevoEstado) {
-  const cliente = orden?.cliente_nombre || "cliente";
+  const cliente = orden?.cliente_nombre || orden?.cliente || "cliente";
   const placa = orden?.placa || "sin placa";
-  const vehiculo = [orden?.marca, orden?.modelo, orden?.anio].filter(Boolean).join(" ");
+  const marcaModelo = [orden?.marca, orden?.modelo, orden?.anio].filter(Boolean).join(" ") || "vehículo";
   const numeroOrden = orden?.numero_orden ? `Orden: ${orden.numero_orden}` : "";
-  const cuerpoEstado = STATUS_TEMPLATE[nuevoEstado] || `Tu vehículo cambió al estado: ${nuevoEstado}.`;
+  const cuerpoEstado = getStatusMessage(
+    {
+      cliente_nombre: cliente,
+      marca_modelo: marcaModelo,
+      placa,
+      marca: orden?.marca,
+      modelo: orden?.modelo
+    },
+    nuevoEstado
+  );
 
   return [
-    `Hola ${cliente},`,
-    `Vehículo: ${vehiculo || "No indicado"} (${placa}).`,
-    numeroOrden,
     cuerpoEstado,
+    numeroOrden,
     "Cualquier consulta estamos para servirte.",
     "Taller Fonseca"
   ].filter(Boolean).join("\n");

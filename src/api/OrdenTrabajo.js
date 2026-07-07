@@ -1,4 +1,5 @@
 // src/api/OrdenTrabajo.js
+// @ts-nocheck
 import { supabase } from "../lib/supabaseClient";
 
 export const OrdenTrabajoAPI = {
@@ -92,6 +93,29 @@ export const OrdenTrabajoAPI = {
             return data;
         } catch (error) {
             console.error(`Error en OrdenTrabajoAPI.actualizar (${id}):`, error.message);
+            throw error;
+        }
+    },
+
+    /**
+     * Actualizar estación kanban y registrar histórico en el mismo update.
+     */
+    actualizarEstatusKanbanConHistorial: async (id, nuevaEstacion, historialKanban) => {
+        try {
+            const { data, error } = await supabase
+                .from('orden_trabajo')
+                .update({
+                    estado_kanban: nuevaEstacion,
+                    historial_kanban: historialKanban
+                })
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error(`Error en OrdenTrabajoAPI.actualizarEstatusKanbanConHistorial (${id}):`, error.message);
             throw error;
         }
     },
