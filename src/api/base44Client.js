@@ -253,15 +253,63 @@ const normalizeRole = (rawRole) => {
 	return roleAliases[normalized] || "user";
 };
 
-const normalizeUser = (user) => {
+const normalizeUser = (user, profile = null) => {
 	if (!user) return null;
-	const roleRaw = user.user_metadata?.role || user.app_metadata?.role || "user";
+	const roleRaw = profile?.rol || user.user_metadata?.role || user.app_metadata?.role || "user";
 	const role = normalizeRole(roleRaw);
 	return {
 		...user,
 		role,
-		full_name: user.user_metadata?.full_name || user.user_metadata?.name || user.email
+		full_name: profile?.nombre || user.user_metadata?.full_name || user.user_metadata?.name || user.email,
+		perfil_id: profile?.id || null,
+		perfil_rol: profile?.rol || null
 	};
+};
+
+const getProfileByAuthUser = async (authUser) => {
+	if (!authUser) return null;
+
+	let profile = null;
+
+	if (authUser.id) {
+		const byUid = await supabase
+			.from("usuario")
+			.select("id, email, nombre, rol, uid_auth")
+			.eq("uid_auth", authUser.id)
+			.maybeSingle();
+
+		if (!byUid.error) {
+			profile = byUid.data || null;
+		}
+	}
+
+	if (!profile && authUser.email) {
+		const byEmail = await supabase
+			.from("usuario")
+			.select("id, email, nombre, rol, uid_auth")
+			.eq("email", authUser.email)
+			.maybeSingle();
+
+		if (!byEmail.error) {
+			profile = byEmail.data || null;
+		}
+	}
+
+	if (profile && !profile.uid_auth && authUser.id) {
+		const { error: linkError } = await supabase
+			.from("usuario")
+			.update({ uid_auth: authUser.id })
+			.eq("id", profile.id);
+
+		if (!linkError) {
+			profile = {
+				...profile,
+				uid_auth: authUser.id
+			};
+		}
+	}
+
+	return profile;
 };
 
 const auth = {
@@ -270,7 +318,9 @@ const auth = {
 		if (error || !data?.user) {
 			throw toError(error, "Usuario no autenticado");
 		}
-		return normalizeUser(data.user);
+
+		const profile = await getProfileByAuthUser(data.user);
+		return normalizeUser(data.user, profile);
 	},
 
 	async loginViaEmailPassword(email, password) {
@@ -302,9 +352,11 @@ const auth = {
 			type: "signup"
 		});
 		if (error) throw toError(error, "Código inválido");
+		const authUser = data?.user || data?.session?.user;
+		const profile = await getProfileByAuthUser(authUser);
 		return {
 			access_token: data?.session?.access_token || null,
-			user: normalizeUser(data?.user || data?.session?.user)
+			user: normalizeUser(authUser, profile)
 		};
 	},
 
@@ -395,7 +447,7 @@ const integrations = {
 	}
 };
 
-export const base44 = {
+export const apiClient = {
 	entities: {
 		OrdenTrabajo: buildEntityApi("OrdenTrabajo"),
 		LineaAvaluo: buildEntityApi("LineaAvaluo"),
@@ -412,3 +464,6 @@ export const base44 = {
 	auth,
 	integrations
 };
+
+// Alias de compatibilidad para no romper imports existentes.
+export const base44 = apiClient;

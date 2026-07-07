@@ -1,14 +1,15 @@
 // @ts-nocheck
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Package, Plus, Search, AlertTriangle, TrendingDown, TrendingUp, Boxes, FlaskConical, DollarSign, Lock } from "lucide-react";
+import { Package, Plus, Search, AlertTriangle, TrendingDown, Boxes, DollarSign, Lock, Upload } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { formatColones } from "@/lib/utils";
+import * as XLSX from "xlsx";
 
 const CATEGORIAS = ["Pintura", "Lija", "Transparente", "Masilla", "Primer", "Thinner", "Repuesto Mecánico", "Herramienta", "Otro"];
 const UNIDADES = ["Litro", "Galón", "Unidad", "Kilo", "Metro", "Caja"];
@@ -35,6 +36,74 @@ const normalizeProductoPayload = (form) => ({
   stock_minimo: Number(form.stock_minimo || 0),
   precio_unitario: Number(form.precio_unitario || 0),
 });
+
+const normalizeHeader = (value = "") => String(value)
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase()
+  .replace(/[^a-z0-9]/g, "");
+
+const HEADER_ALIASES = {
+  nombre: ["nombre", "producto", "descripcion", "articulo"],
+  codigo: ["codigo", "cod", "sku"],
+  tipo: ["tipo"],
+  categoria: ["categoria", "categoria1"],
+  unidad: ["unidad", "unidades"],
+  stock_actual: ["stockactual", "stock", "existencia", "cantidad"],
+  stock_minimo: ["stockminimo", "minimo", "stockmin"],
+  precio_unitario: ["preciounitario", "precio", "costounitario", "valorunitario"],
+  proveedor: ["proveedor", "marca"],
+};
+
+const readExcelNumber = (value, fallback = 0) => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  if (value === null || value === undefined || value === "") return fallback;
+  const normalized = String(value).replace(/\s/g, "").replace(/\./g, "").replace(/,/g, ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const pickCell = (row, aliases) => {
+  const keys = Object.keys(row ?? {});
+  for (const key of keys) {
+    if (aliases.includes(normalizeHeader(key))) {
+      return row[key];
+    }
+  }
+  return undefined;
+};
+
+const mapExcelRowToProducto = (row) => {
+  const nombreRaw = pickCell(row, HEADER_ALIASES.nombre);
+  const nombre = String(nombreRaw ?? "").trim();
+  if (!nombre) return null;
+
+  const tipoRaw = String(pickCell(row, HEADER_ALIASES.tipo) ?? "").trim();
+  const categoriaRaw = String(pickCell(row, HEADER_ALIASES.categoria) ?? "").trim();
+  const unidadRaw = String(pickCell(row, HEADER_ALIASES.unidad) ?? "").trim();
+
+  const tipo = tipoRaw && ["Repuesto Físico", "Consumible Químico"].includes(tipoRaw)
+    ? tipoRaw
+    : "Consumible Químico";
+  const categoria = categoriaRaw && CATEGORIAS.includes(categoriaRaw)
+    ? categoriaRaw
+    : "Otro";
+  const unidad = unidadRaw && UNIDADES.includes(unidadRaw)
+    ? unidadRaw
+    : "Unidad";
+
+  return {
+    nombre,
+    codigo: String(pickCell(row, HEADER_ALIASES.codigo) ?? "").trim(),
+    tipo,
+    categoria,
+    unidad,
+    stock_actual: Math.max(0, readExcelNumber(pickCell(row, HEADER_ALIASES.stock_actual), 0)),
+    stock_minimo: Math.max(0, readExcelNumber(pickCell(row, HEADER_ALIASES.stock_minimo), 0)),
+    precio_unitario: Math.max(0, readExcelNumber(pickCell(row, HEADER_ALIASES.precio_unitario), 0)),
+    proveedor: String(pickCell(row, HEADER_ALIASES.proveedor) ?? "").trim(),
+  };
+};
 
 function ProductoModal({ open, onClose, onSave, initial }) {
   const [form, setForm] = useState(buildProductoForm(initial));
@@ -212,6 +281,8 @@ export default function Inventario() {
   const [modalProd, setModalProd] = useState(false);
   const [editProd, setEditProd] = useState(null);
   const [modalMov, setModalMov] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     Promise.all([
@@ -274,6 +345,72 @@ export default function Inventario() {
     setModalMov(null);
   };
 
+  const triggerImport = () => fileInputRef.current?.click();
+
+  const handleExcelImport = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setImporting(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) {
+        toast({ title: "Archivo inválido", description: "No se encontró ninguna hoja en el archivo.", variant: "destructive" });
+        return;
+      }
+
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
+      if (!rows.length) {
+        toast({ title: "Archivo vacío", description: "La hoja seleccionada no contiene registros.", variant: "destructive" });
+        return;
+      }
+
+      const payload = rows
+        .map(mapExcelRowToProducto)
+        .filter(Boolean);
+
+      if (!payload.length) {
+        toast({
+          title: "Sin filas válidas",
+          description: "No se encontraron productos válidos. Verifica que exista una columna 'nombre' o 'producto'.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const results = await Promise.allSettled(payload.map((item) => base44.entities.Inventario.create(item)));
+      const success = results.filter((r) => r.status === "fulfilled");
+      const failed = results.length - success.length;
+
+      if (success.length) {
+        const created = success.map((r) => r.value);
+        setProductos((prev) => [...prev, ...created]);
+      }
+
+      if (failed > 0) {
+        toast({
+          title: "Importación parcial",
+          description: `Se importaron ${success.length} producto(s) y ${failed} fallaron.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Importación completada", description: `Se importaron ${success.length} producto(s).` });
+      }
+    } catch (error) {
+      console.error(error);
+      toast({
+        title: "Error al importar",
+        description: "No se pudo procesar el archivo Excel. Verifica el formato e intenta de nuevo.",
+        variant: "destructive",
+      });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const searchLower = search.toLowerCase();
 
   const filtered = useMemo(() => {
@@ -314,10 +451,28 @@ export default function Inventario() {
           <p className="text-muted-foreground text-sm uppercase tracking-wider">Repuestos físicos y consumibles químicos</p>
         </div>
         {canManageInventory ? (
-          <Button onClick={() => { setEditProd(null); setModalProd(true); }}
-            className="bg-primary text-primary-foreground font-semibold gap-2 uppercase tracking-wide">
-            <Plus size={16} /> Nuevo Producto
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={handleExcelImport}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={triggerImport}
+              disabled={importing}
+              className="border-border font-semibold gap-2 uppercase tracking-wide"
+            >
+              <Upload size={16} /> {importing ? "Importando..." : "Cargar Excel"}
+            </Button>
+            <Button onClick={() => { setEditProd(null); setModalProd(true); }}
+              className="bg-primary text-primary-foreground font-semibold gap-2 uppercase tracking-wide">
+              <Plus size={16} /> Nuevo Producto
+            </Button>
+          </div>
         ) : (
           <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border ${roleColor}`}>
             <Lock size={14} /> {roleLabel} — Solo lectura

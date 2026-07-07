@@ -2,10 +2,20 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
+import { WhatsAppAPI } from "@/api/WhatsApp";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/components/ui/use-toast";
 import {
   ArrowLeft, Car, User, Shield, Phone, MapPin, Calendar,
@@ -14,6 +24,7 @@ import {
 } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { formatColones, formatDisplayDateTime } from "@/lib/utils";
+import { buildStatusWhatsAppMessage, normalizeWhatsAppPhone } from "@/lib/whatsapp";
 
 const ESTADO_COT_COLORS = {
   "Borrador": "bg-secondary text-muted-foreground border-border",
@@ -69,6 +80,10 @@ export default function OrdenDetalle() {
   const [tab, setTab] = useState("info");
   const [updatingEstado, setUpdatingEstado] = useState(false);
   const [fotosView, setFotosView] = useState([]);
+  const [waConfirmOpen, setWaConfirmOpen] = useState(false);
+  const [pendingWhatsappStatus, setPendingWhatsappStatus] = useState("");
+  const [pendingWhatsappMessage, setPendingWhatsappMessage] = useState("");
+  const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -180,8 +195,76 @@ export default function OrdenDetalle() {
       estado_kanban: nuevaEstacion,
       historial_kanban: historial
     });
+
     setOrden(prev => ({ ...prev, estado_kanban: nuevaEstacion, historial_kanban: historial }));
-    toast({ title: "Estado actualizado", description: `Vehículo movido a: ${nuevaEstacion}` });
+    if (!normalizeWhatsAppPhone(orden?.cliente_telefono)) {
+      toast({
+        title: "Estado actualizado",
+        description: `Vehículo movido a: ${nuevaEstacion}. No se pudo preparar WhatsApp: falta teléfono.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setPendingWhatsappStatus(nuevaEstacion);
+    setPendingWhatsappMessage(buildStatusWhatsAppMessage(orden, nuevaEstacion));
+    setWaConfirmOpen(true);
+    toast({ title: "Estado actualizado", description: `Vehículo movido a: ${nuevaEstacion}.` });
+  };
+
+  const copyMessageToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(pendingWhatsappMessage);
+      setWaConfirmOpen(false);
+      toast({
+        title: "Mensaje copiado",
+        description: "La notificación quedó copiada para compartirla al cliente."
+      });
+    } catch {
+      toast({
+        title: "No se pudo copiar",
+        description: "Intente nuevamente. Si persiste, copie manualmente el texto.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const sendMessageAutomatically = async () => {
+    const phone = normalizeWhatsAppPhone(orden?.cliente_telefono);
+    if (!phone) {
+      toast({
+        title: "No se pudo enviar",
+        description: "Falta teléfono del cliente.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      setSendingWhatsapp(true);
+      await WhatsAppAPI.enviarEstatus({
+        to: phone,
+        message: pendingWhatsappMessage,
+        order_id: orden?.id,
+        estado: pendingWhatsappStatus,
+        placa: orden?.placa,
+        cliente: orden?.cliente_nombre
+      });
+
+      setWaConfirmOpen(false);
+      toast({
+        title: "Mensaje enviado",
+        description: "El cliente fue notificado automáticamente por WhatsApp."
+      });
+    } catch (error) {
+      toast({
+        title: "Error enviando WhatsApp",
+        description: error?.message || "No fue posible enviar el mensaje automático.",
+        variant: "destructive"
+      });
+    } finally {
+      setSendingWhatsapp(false);
+    }
   };
 
   const totalCotizado = lineas.reduce((sum, l) => sum + (l.subtotal || 0), 0);
@@ -286,6 +369,28 @@ export default function OrdenDetalle() {
           </div>
         )}
       </div>
+
+      <AlertDialog open={waConfirmOpen} onOpenChange={setWaConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Notificar al cliente por WhatsApp</AlertDialogTitle>
+            <AlertDialogDescription>
+              El estado del vehículo cambió a <span className="font-semibold text-foreground">{pendingWhatsappStatus}</span>.
+              Revise y copie el mensaje para enviarlo sin salir de la app.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-md border border-border bg-secondary/30 p-3 text-sm whitespace-pre-wrap">
+            {pendingWhatsappMessage}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>No enviar</AlertDialogCancel>
+            <Button variant="outline" onClick={copyMessageToClipboard} disabled={sendingWhatsapp}>Copiar mensaje</Button>
+            <Button onClick={sendMessageAutomatically} disabled={sendingWhatsapp}>
+              {sendingWhatsapp ? "Enviando..." : "Enviar automático"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Tabs */}
       <div className="flex overflow-x-auto border-b border-border gap-1 pb-0">

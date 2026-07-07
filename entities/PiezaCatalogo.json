@@ -10,14 +10,30 @@
       "type": "string",
       "title": "Categor\u00eda",
       "enum": [
-        "Carrocer\u00eda Frontal",
-        "Carrocer\u00eda Lateral",
-        "Carrocer\u00eda Trasera",
-        "Techo y Piso",
-        "Iluminaci\u00f3n",
-        "Vidrios",
-        "Mec\u00e1nica Visible",
-        "Interior"
+        "Carrocer\u00eda",
+        "El\u00e9ctrico",
+        "Mec\u00e1nica",
+        "Faroler\u00eda",
+        "Accesorios",
+        "Cristales-vidrios",
+        "Motor",
+        "Originales",
+        "Usados",
+        "Filtros"
+      ]
+    },
+    "marca": {
+      "type": "string",
+      "title": "Marca"
+    },
+    "tipo": {
+      "type": "string",
+      "title": "Tipo",
+      "enum": [
+        "Genericos",
+        "Originales",
+        "Usados",
+        "Nuevos"
       ]
     },
     "codigo": {
@@ -27,6 +43,11 @@
     "proveedor": {
       "type": "string",
       "title": "Proveedor"
+    },
+    "unidades": {
+      "type": "number",
+      "title": "Unidades",
+      "default": 0
     },
     "costo": {
       "type": "number",

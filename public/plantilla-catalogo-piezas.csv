@@ -1,0 +1,6 @@
+nombre,categoria,marca,tipo,codigo,proveedor,unidades,costo,precio
+Bumper delantero,Carrocería,Toyota,Originales,P-001,Repuestos del Valle,2,45000,65000
+Faro derecho,Farolería,Hyundai,Genericos,P-002,Autopartes Central,1,38000,52000
+Filtro de aceite,Filtros,Nissan,Nuevos,P-003,Distribuidora Motor,4,4500,7000
+Vidrio parabrisas,Cristales-vidrios,Kia,Usados,P-004,Cristales SA,1,95000,125000
+Sensor ABS,Eléctrico,Honda,Nuevos,P-005,Electro Auto,3,22000,34000
