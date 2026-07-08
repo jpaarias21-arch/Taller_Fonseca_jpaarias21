@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Fragment, useState, useEffect } from "react";
+import { Fragment, useMemo, useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { OrdenTrabajoAPI } from "@/api/OrdenTrabajo";
@@ -14,7 +14,7 @@ import { useToast } from "@/components/ui/use-toast";
 import {
   ArrowLeft, Car, User, Shield, Phone, MapPin, Calendar,
   CheckCircle, Clock, AlertTriangle, Camera, ChevronRight,
-  Package, Wrench, DollarSign, FileText, History, Lock, Pencil, Save, X
+  Package, Wrench, DollarSign, FileText, History, Lock, Pencil, Save, X, Search
 } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { formatColones, formatDisplayDateTime } from "@/lib/utils";
@@ -35,6 +35,13 @@ const KANBAN_STATIONS = [
 ];
 
 const OPERATIVE_STATIONS = ["Desarmado", "Enderezado", "Preparación", "Cabina de Pintura", "Armado", "Pulido", "Control de Calidad", "Entregado"];
+
+const normalizeText = (value) =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
 
 const normalizePhotoEntry = (value) => {
   if (typeof value === "string") return value.trim();
@@ -117,20 +124,25 @@ export default function OrdenDetalle() {
   const [pendingKanbanHistorial, setPendingKanbanHistorial] = useState([]);
   const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
   const [uploadingDocumentoIns, setUploadingDocumentoIns] = useState(false);
+  const [piezasCatalogo, setPiezasCatalogo] = useState([]);
+  const [piezaQuery, setPiezaQuery] = useState("");
+  const [addingLinea, setAddingLinea] = useState(false);
   const [editingLineaId, setEditingLineaId] = useState(null);
   const [lineaDraft, setLineaDraft] = useState(null);
   const [savingLineaId, setSavingLineaId] = useState(null);
 
   useEffect(() => {
     const load = async () => {
-      const [ords, lins, reqs] = await Promise.all([
+      const [ords, lins, reqs, piezas] = await Promise.all([
         base44.entities.OrdenTrabajo.list("-created_date", 200).then(all => all.filter(o => o.id === id)),
         base44.entities.LineaAvaluo.list("-created_date", 200).then(all => all.filter(l => l.orden_id === id)),
         base44.entities.RequerimientoCompra.list("-created_date", 200).then(all => all.filter(r => r.orden_id === id)),
+        base44.entities.PiezaCatalogo.list("nombre", 1000).catch(() => []),
       ]);
       setOrden(ords[0] || null);
       setLineas(lins);
       setCompras(reqs);
+      setPiezasCatalogo(piezas || []);
       setLoading(false);
     };
     load();
@@ -526,6 +538,74 @@ export default function OrdenDetalle() {
     }
   };
 
+  const piezasFiltradas = useMemo(() => {
+    const q = normalizeText(piezaQuery);
+    if (!q) return [];
+
+    return piezasCatalogo
+      .filter((pieza) => {
+        const nombre = normalizeText(pieza?.nombre);
+        const codigo = normalizeText(pieza?.codigo);
+        const categoria = normalizeText(pieza?.categoria);
+        return nombre.includes(q) || codigo.includes(q) || categoria.includes(q);
+      })
+      .slice(0, 8);
+  }, [piezaQuery, piezasCatalogo]);
+
+  const agregarPiezaAvaluo = async (pieza) => {
+    if (!pieza?.id || addingLinea) return;
+
+    const yaExiste = lineas.some((linea) => linea.pieza_id === pieza.id);
+    if (yaExiste) {
+      toast({
+        title: "Pieza ya agregada",
+        description: "Esa pieza ya existe en el avalúo. Edítela desde la tabla.",
+      });
+      return;
+    }
+
+    setAddingLinea(true);
+    try {
+      const payload = {
+        orden_id: id,
+        pieza_id: pieza.id,
+        pieza_nombre: pieza.nombre,
+        pieza_categoria: pieza.categoria,
+        cantidad: 1,
+        flag_desarmado_montaje: false,
+        flag_reparacion: false,
+        flag_pintura: false,
+        tipo_repuesto: "Ninguno",
+        descripcion_dano: "",
+        horas_dm: 0,
+        horas_reparacion: 0,
+        costo_pintura: 0,
+        costo_repuesto: 0,
+        subtotal: 0,
+        es_ampliacion: true,
+      };
+
+      const nuevaLinea = await base44.entities.LineaAvaluo.create(payload);
+      const updatedLineas = [...lineas, nuevaLinea];
+      const montoCotizado = updatedLineas.reduce((sum, current) => sum + getLineaMontoCotizado(current), 0);
+
+      await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
+
+      setLineas(updatedLineas);
+      setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
+      setPiezaQuery("");
+      toast({ title: "Pieza agregada", description: "La línea se agregó al avalúo." });
+    } catch (error) {
+      toast({
+        title: "No se pudo agregar la pieza",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setAddingLinea(false);
+    }
+  };
+
   const totalCotizado = lineas.reduce((sum, l) => sum + getLineaMontoCotizado(l), 0);
   const totalHorasAvaluo = lineas.reduce((sum, l) => sum + getLineaHoras(l), 0);
   const lineasConRepuesto = lineas.filter((l) => l.tipo_repuesto === "Nuevo" || l.tipo_repuesto === "UTS");
@@ -768,12 +848,47 @@ export default function OrdenDetalle() {
       {/* Tab: Avalúo */}
       {tab === "avaluo" && (
         <div className="data-card p-0 overflow-hidden">
+          {canEditOrders && (
+            <div className="border-b border-border p-4 bg-secondary/10">
+              <label className="text-xs text-muted-foreground font-semibold uppercase">Agregar producto al avalúo</label>
+              <div className="relative mt-2 max-w-2xl">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={piezaQuery}
+                  onChange={e => setPiezaQuery(e.target.value)}
+                  placeholder="Buscar pieza del catálogo por nombre, código o categoría..."
+                  className="pl-9 bg-secondary border-border"
+                  disabled={addingLinea}
+                />
+                {piezaQuery.trim() && (
+                  <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-xl">
+                    {piezasFiltradas.length > 0 ? (
+                      piezasFiltradas.map((pieza) => (
+                        <button
+                          key={pieza.id}
+                          type="button"
+                          onClick={() => agregarPiezaAvaluo(pieza)}
+                          className="w-full border-b border-border/60 px-4 py-2.5 text-left hover:bg-secondary last:border-b-0"
+                          disabled={addingLinea}
+                        >
+                          <p className="text-sm font-medium text-foreground">{pieza.nombre}</p>
+                          <p className="text-xs text-muted-foreground">{pieza.categoria}{pieza.codigo ? ` · ${pieza.codigo}` : ""}</p>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-4 py-3 text-sm text-muted-foreground">No se encontraron piezas con ese criterio.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-secondary/30">
                   <th className="text-left py-3 px-4 text-muted-foreground font-semibold text-xs uppercase">Pieza</th>
-                  <th className="text-center py-3 px-3 text-muted-foreground font-semibold text-xs uppercase">Horas</th>
+                  <th className="text-center py-3 px-3 text-muted-foreground font-semibold text-xs uppercase whitespace-nowrap w-24">Horas</th>
                   <th className="text-center py-3 px-3 text-muted-foreground font-semibold text-xs uppercase">D&M</th>
                   <th className="text-center py-3 px-3 text-muted-foreground font-semibold text-xs uppercase">Rep.</th>
                   <th className="text-center py-3 px-3 text-muted-foreground font-semibold text-xs uppercase">Pint.</th>
@@ -793,8 +908,11 @@ export default function OrdenDetalle() {
                         <p className="text-xs text-muted-foreground">{l.pieza_categoria}</p>
                         {l.es_ampliacion && <span className="text-xs text-purple-400 font-semibold">AMPLIACIÓN</span>}
                       </td>
-                      <td className="py-3 px-3 text-center text-xs text-muted-foreground">
-                        <span>{getLineaHoras(l)} h</span>
+                      <td className="py-3 px-3 text-center text-xs text-muted-foreground whitespace-nowrap min-w-24">
+                        <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                          <span>{getLineaHoras(l)}</span>
+                          <span>h</span>
+                        </span>
                       </td>
                       <td className="py-3 px-3 text-center">{l.flag_desarmado_montaje ? "✓" : "—"}</td>
                       <td className="py-3 px-3 text-center">{l.flag_reparacion ? "✓" : "—"}</td>
@@ -925,7 +1043,12 @@ export default function OrdenDetalle() {
                 <tfoot>
                   <tr className="bg-secondary/30 border-t border-border">
                     <td className="py-3 px-4 text-right font-bold uppercase text-sm">Total</td>
-                    <td className="py-3 px-4 text-center font-bold text-foreground">{totalHorasAvaluo} h</td>
+                    <td className="py-3 px-4 text-center font-bold text-foreground whitespace-nowrap min-w-24">
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                        <span>{totalHorasAvaluo}</span>
+                        <span>h</span>
+                      </span>
+                    </td>
                     <td colSpan={5} className="py-3 px-4" />
                     <td className="py-3 px-4 text-right font-bold text-primary text-lg">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                     {canEditOrders && <td className="py-3 px-4" />}
