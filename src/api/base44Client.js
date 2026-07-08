@@ -27,6 +27,16 @@ const toError = (error, fallbackMessage) => {
 	return new Error(error.message || fallbackMessage);
 };
 
+const parseMissingColumnError = (error) => {
+	const message = String(error?.message || "");
+	const match = message.match(/Could not find the '([^']+)' column of '([^']+)' in the schema cache/i);
+	if (!match) return null;
+	return {
+		column: match[1],
+		table: match[2]
+	};
+};
+
 const stableStringify = (value) => {
 	if (value === null || value === undefined) return String(value);
 	if (typeof value !== "object") return JSON.stringify(value);
@@ -193,22 +203,48 @@ const buildEntityApi = (entityName) => {
 		},
 
 		async create(payload) {
-			const { data, error } = await withTimeout(
-				supabase.from(table).insert([payload]).select().single(),
-				WRITE_TIMEOUT_MS,
-				`create ${entityName}`
-			);
+			const runInsert = (insertPayload) =>
+				withTimeout(
+					supabase.from(table).insert([insertPayload]).select().single(),
+					WRITE_TIMEOUT_MS,
+					`create ${entityName}`
+				);
+
+			let { data, error } = await runInsert(payload);
+			if (error) {
+				const missing = parseMissingColumnError(error);
+				if (missing?.table === table && Object.prototype.hasOwnProperty.call(payload || {}, missing.column)) {
+					const sanitizedPayload = { ...(payload || {}) };
+					delete sanitizedPayload[missing.column];
+					const retry = await runInsert(sanitizedPayload);
+					data = retry.data;
+					error = retry.error;
+				}
+			}
 			if (error) throw toError(error, `Error creando ${entityName}`);
 			invalidateTableCache(table);
 			return data;
 		},
 
 		async update(id, payload) {
-			const { data, error } = await withTimeout(
-				supabase.from(table).update(payload).eq("id", id).select().single(),
-				WRITE_TIMEOUT_MS,
-				`update ${entityName}`
-			);
+			const runUpdate = (updatePayload) =>
+				withTimeout(
+					supabase.from(table).update(updatePayload).eq("id", id).select().single(),
+					WRITE_TIMEOUT_MS,
+					`update ${entityName}`
+				);
+
+			let { data, error } = await runUpdate(payload);
+			if (error) {
+				const missing = parseMissingColumnError(error);
+				if (missing?.table === table && Object.prototype.hasOwnProperty.call(payload || {}, missing.column)) {
+					const sanitizedPayload = { ...(payload || {}) };
+					delete sanitizedPayload[missing.column];
+					const retry = await runUpdate(sanitizedPayload);
+					data = retry.data;
+					error = retry.error;
+				}
+			}
 			if (error) throw toError(error, `Error actualizando ${entityName}`);
 			invalidateTableCache(table);
 			return data;

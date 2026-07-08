@@ -159,6 +159,13 @@
         "type": "string"
       }
     },
+    "documentos_ins": {
+      "type": "array",
+      "title": "Documentaci\u00f3n INS",
+      "items": {
+        "type": "string"
+      }
+    },
     "descripcion_danos": {
       "type": "string",
       "title": "Descripci\u00f3n General de Da\u00f1os"

@@ -138,6 +138,46 @@ const mapExcelRowToPieza = (row) => {
   };
 };
 
+const normalizeImportErrorMessage = (errorLike) => {
+  const message = String(errorLike?.message || errorLike || "Error desconocido").trim();
+  const lower = message.toLowerCase();
+
+  if (lower.includes("duplicate key") || lower.includes("unique constraint") || lower.includes("pieza_codigo_key")) {
+    return "Código interno duplicado";
+  }
+
+  if (lower.includes("violates check constraint") || lower.includes("invalid input value for enum")) {
+    return "Valor inválido en categoría, tipo o marca";
+  }
+
+  if (lower.includes("row-level security") || lower.includes("permission denied") || lower.includes("not allowed")) {
+    return "Sin permisos para crear piezas";
+  }
+
+  if (lower.includes("null value") || lower.includes("not-null")) {
+    return "Faltan campos obligatorios";
+  }
+
+  return message;
+};
+
+const buildImportFailureSummary = (messages = []) => {
+  if (!messages.length) return "No se pudo determinar la causa.";
+
+  const counts = new Map();
+  messages.forEach((msg) => {
+    counts.set(msg, (counts.get(msg) || 0) + 1);
+  });
+
+  const top = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([msg, count]) => `${msg} (${count})`)
+    .join("; ");
+
+  return top;
+};
+
 const sanitizeCurrencyInput = (value) => String(value ?? "").replace(/[^\d]/g, "");
 
 const formatCurrencyInput = (value) => {
@@ -411,6 +451,10 @@ export default function Catalogo() {
       const results = await Promise.allSettled(payloadUnico.map((item) => base44.entities.PiezaCatalogo.create(item)));
       const success = results.filter((r) => r.status === "fulfilled");
       const failed = results.length - success.length;
+      const failedMessages = results
+        .filter((r) => r.status === "rejected")
+        .map((r) => normalizeImportErrorMessage(r.reason));
+      const failedSummary = buildImportFailureSummary(failedMessages);
 
       if (success.length) {
         const created = success.map((r) => r.value);
@@ -418,9 +462,10 @@ export default function Catalogo() {
       }
 
       if (failed > 0) {
+        console.error("Errores de importación de piezas:", failedMessages);
         toast({
           title: "Importación parcial",
-          description: `Se importaron ${success.length} pieza(s) y ${failed} fallaron.`,
+          description: `Se importaron ${success.length} pieza(s) y ${failed} fallaron. Causa: ${failedSummary}`,
           variant: "destructive",
         });
       } else {

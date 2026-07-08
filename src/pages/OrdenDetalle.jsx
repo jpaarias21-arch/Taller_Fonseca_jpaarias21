@@ -61,11 +61,26 @@ const extractUploadsPath = (value) => {
   return null;
 };
 
+const getStoredFileName = (value, fallback = "Documento") => {
+  const raw = String(value || "").trim();
+  if (!raw) return fallback;
+  if (raw.startsWith("data:")) return fallback;
+
+  try {
+    const parsed = new URL(raw);
+    const fileName = parsed.pathname.split("/").pop();
+    return fileName ? decodeURIComponent(fileName) : fallback;
+  } catch {
+    const fileName = raw.split("/").pop();
+    return fileName ? decodeURIComponent(fileName) : fallback;
+  }
+};
+
 export default function OrdenDetalle() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { canApproveQuote, canMoveKanban, canCreateOrder } = useRole();
+  const { canApproveQuote, canMoveKanban, canEditOrders } = useRole();
   const [orden, setOrden] = useState(null);
   const [lineas, setLineas] = useState([]);
   const [compras, setCompras] = useState([]);
@@ -73,11 +88,13 @@ export default function OrdenDetalle() {
   const [tab, setTab] = useState("info");
   const [updatingEstado, setUpdatingEstado] = useState(false);
   const [fotosView, setFotosView] = useState([]);
+  const [documentosInsView, setDocumentosInsView] = useState([]);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [pendingWhatsappStatus, setPendingWhatsappStatus] = useState("");
   const [pendingWhatsappMessage, setPendingWhatsappMessage] = useState("");
   const [pendingKanbanHistorial, setPendingKanbanHistorial] = useState([]);
   const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
+  const [uploadingDocumentoIns, setUploadingDocumentoIns] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -133,6 +150,104 @@ export default function OrdenDetalle() {
       cancelled = true;
     };
   }, [orden?.fotos]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolveDocumentosIns = async () => {
+      const rawDocs = Array.isArray(orden?.documentos_ins) ? orden.documentos_ins : [];
+      const resolved = await Promise.all(
+        rawDocs.map(async (entry, i) => {
+          const raw = normalizePhotoEntry(entry);
+          if (!raw || raw.startsWith("blob:")) {
+            return { id: `${i}-invalid`, url: null, name: `Documento INS ${i + 1}` };
+          }
+
+          if (raw.startsWith("data:application/pdf")) {
+            return { id: `${i}-data`, url: raw, name: `Documento INS ${i + 1}` };
+          }
+
+          const path = extractUploadsPath(raw);
+          const fallbackName = getStoredFileName(raw, `Documento INS ${i + 1}`);
+          if (!path) {
+            return { id: `${i}-url`, url: raw, name: fallbackName };
+          }
+
+          const signed = await supabase.storage.from("uploads").createSignedUrl(path, 60 * 60 * 24 * 7);
+          if (signed.data?.signedUrl) {
+            return { id: `${i}-signed`, url: signed.data.signedUrl, name: fallbackName };
+          }
+
+          const pub = supabase.storage.from("uploads").getPublicUrl(path);
+          return { id: `${i}-pub`, url: pub.data?.publicUrl || raw, name: fallbackName };
+        })
+      );
+
+      if (!cancelled) setDocumentosInsView(resolved);
+    };
+
+    resolveDocumentosIns();
+    return () => {
+      cancelled = true;
+    };
+  }, [orden?.documentos_ins]);
+
+  const handleDocumentoInsUpload = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+
+    setUploadingDocumentoIns(true);
+    try {
+      const uploaded = [];
+
+      for (const file of files) {
+        if (file.type !== "application/pdf") {
+          toast({
+            title: "Archivo inválido",
+            description: "Solo se permiten documentos PDF del INS.",
+            variant: "destructive"
+          });
+          continue;
+        }
+
+        const { file_url } = await base44.integrations.Core.UploadFile({ file });
+        uploaded.push(file_url);
+      }
+
+      if (!uploaded.length) return;
+
+      const documentosActuales = Array.isArray(orden?.documentos_ins) ? orden.documentos_ins : [];
+      const documentosNuevos = [...documentosActuales, ...uploaded];
+      await base44.entities.OrdenTrabajo.update(id, { documentos_ins: documentosNuevos });
+      setOrden((prev) => ({ ...prev, documentos_ins: documentosNuevos }));
+      toast({ title: "Documentación INS cargada", description: `${uploaded.length} PDF(s) agregados.` });
+    } catch (error) {
+      toast({
+        title: "No se pudo subir la documentación INS",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setUploadingDocumentoIns(false);
+    }
+  };
+
+  const removeDocumentoIns = async (index) => {
+    try {
+      const documentosActuales = Array.isArray(orden?.documentos_ins) ? orden.documentos_ins : [];
+      const documentosNuevos = documentosActuales.filter((_, i) => i !== index);
+      await base44.entities.OrdenTrabajo.update(id, { documentos_ins: documentosNuevos });
+      setOrden((prev) => ({ ...prev, documentos_ins: documentosNuevos }));
+      toast({ title: "Documento eliminado" });
+    } catch (error) {
+      toast({
+        title: "No se pudo eliminar el documento",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    }
+  };
 
   const handleEstadoCotizacion = async (nuevoEstado) => {
     setUpdatingEstado(true);
@@ -284,6 +399,7 @@ export default function OrdenDetalle() {
   };
 
   const totalCotizado = lineas.reduce((sum, l) => sum + (l.subtotal || 0), 0);
+  const lineasConRepuesto = lineas.filter((l) => l.tipo_repuesto === "Nuevo" || l.tipo_repuesto === "UTS");
 
   if (loading) {
     return (
@@ -305,6 +421,7 @@ export default function OrdenDetalle() {
   const TABS = [
     { id: "info", label: "Información", IconComp: Car },
     { id: "avaluo", label: "Avalúo", IconComp: Wrench },
+    { id: "comparativa-ins", label: `Comparativa/INS (${orden.documentos_ins?.length || 0})`, IconComp: FileText },
     { id: "compras", label: `Compras (${compras.length})`, IconComp: Package },
     { id: "fotos", label: `Fotos (${orden.fotos?.length || 0})`, IconComp: Camera },
     { id: "historial", label: "Historial", IconComp: History },
@@ -567,6 +684,142 @@ export default function OrdenDetalle() {
                 </tfoot>
               )}
             </table>
+          </div>
+        </div>
+      )}
+
+      {tab === "comparativa-ins" && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="data-card space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
+                  <FileText size={16} className="text-primary" /> Documentación INS
+                </h3>
+                <p className="text-xs text-muted-foreground mt-1">Adjunta y abre aquí los PDFs enviados por INS para compararlos manualmente con el avalúo.</p>
+              </div>
+              {canEditOrders && (
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border bg-secondary px-3 py-2 text-sm hover:border-primary transition-colors">
+                  <FileText size={14} className="text-primary" />
+                  {uploadingDocumentoIns ? "Subiendo..." : "Cargar PDF INS"}
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    multiple
+                    className="hidden"
+                    onChange={handleDocumentoInsUpload}
+                    disabled={uploadingDocumentoIns}
+                  />
+                </label>
+              )}
+            </div>
+
+            {documentosInsView.length > 0 ? (
+              <div className="space-y-3">
+                {documentosInsView.map((doc, index) => (
+                  <div key={doc.id} className="rounded-lg border border-border bg-secondary/30 p-3 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{doc.name}</p>
+                        <p className="text-xs text-muted-foreground">PDF INS #{index + 1}</p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {doc.url && (
+                          <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline">
+                            Abrir PDF
+                          </a>
+                        )}
+                        {canEditOrders && (
+                          <button type="button" onClick={() => removeDocumentoIns(index)} className="text-xs text-destructive hover:underline">
+                            Eliminar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {doc.url ? (
+                      <iframe
+                        src={doc.url}
+                        title={doc.name}
+                        className="w-full h-80 rounded-md border border-border bg-card"
+                      />
+                    ) : (
+                      <div className="rounded-md border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
+                        No se pudo previsualizar este documento.
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
+                No hay documentación INS cargada para esta orden.
+              </div>
+            )}
+          </div>
+
+          <div className="data-card space-y-4">
+            <div>
+              <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
+                <Wrench size={16} className="text-primary" /> Avalúo Manual
+              </h3>
+              <p className="text-xs text-muted-foreground mt-1">Usa esta lista para contrastar las piezas registradas manualmente contra el PDF del INS.</p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Piezas Avalúo</p>
+                <p className="text-2xl font-heading font-bold text-primary">{lineas.length}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Con Repuesto</p>
+                <p className="text-2xl font-heading font-bold text-primary">{lineasConRepuesto.length}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Total Avalúo</p>
+                <p className="text-xl font-heading font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+              </div>
+            </div>
+
+            {lineas.length > 0 ? (
+              <div className="space-y-3">
+                {lineas.map((linea) => (
+                  <div key={linea.id} className="rounded-lg border border-border bg-secondary/20 p-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="font-semibold text-foreground">{linea.pieza_nombre}</p>
+                        <p className="text-xs text-muted-foreground">{linea.pieza_categoria || "Sin categoría"}</p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`station-badge border text-xs ${
+                          linea.tipo_repuesto === "Nuevo" ? "bg-orange-500/20 text-orange-400 border-orange-500/30"
+                          : linea.tipo_repuesto === "UTS" ? "bg-red-500/20 text-red-400 border-red-500/30"
+                          : linea.tipo_repuesto === "Reparación" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                          : "bg-secondary text-muted-foreground border-border"
+                        }`}>
+                          {linea.tipo_repuesto}
+                        </span>
+                        <span className="text-sm font-semibold text-primary">
+                          {formatColones(linea.subtotal || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-muted-foreground">
+                      <span>D&M: {linea.flag_desarmado_montaje ? "Sí" : "No"}</span>
+                      <span>Reparación: {linea.flag_reparacion ? "Sí" : "No"}</span>
+                      <span>Pintura: {linea.flag_pintura ? "Sí" : "No"}</span>
+                      <span>Repuesto: {linea.tipo_repuesto}</span>
+                    </div>
+                    <div className="mt-3 rounded-md bg-card/60 border border-border px-3 py-2 text-sm text-muted-foreground">
+                      {linea.descripcion_dano || "Sin descripción técnica registrada."}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
+                No hay líneas de avalúo cargadas para comparar.
+              </div>
+            )}
           </div>
         </div>
       )}

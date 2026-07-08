@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { ArrowLeft, Plus, Trash2, Search, AlertCircle, Camera, X } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Search, AlertCircle, Camera, FileText, X } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const MARCAS = ["Toyota","Honda","Hyundai","Kia","Nissan","Ford","Chevrolet","Mitsubishi","Mazda","Volkswagen","BMW","Mercedes-Benz","Audi","Suzuki","Subaru","Otro"];
@@ -19,6 +19,22 @@ const normalizeText = (value) =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+
+const getStoredFileName = (value, fallback = "Documento") => {
+  const raw = String(value || "").trim();
+  if (!raw) return fallback;
+
+  if (raw.startsWith("data:")) return fallback;
+
+  try {
+    const parsed = new URL(raw);
+    const fileName = parsed.pathname.split("/").pop();
+    return fileName ? decodeURIComponent(fileName) : fallback;
+  } catch {
+    const fileName = raw.split("/").pop();
+    return fileName ? decodeURIComponent(fileName) : fallback;
+  }
+};
 
 function PiezaSelector({ piezas, onSelect }) {
   const [query, setQuery] = useState("");
@@ -75,6 +91,7 @@ export default function NuevaOrden() {
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [fotos, setFotos] = useState([]);
+  const [documentosIns, setDocumentosIns] = useState([]);
   const [lineas, setLineas] = useState([]);
   const [placaSugerencias, setPlacaSugerencias] = useState([]);
   const [placaLoading, setPlacaLoading] = useState(false);
@@ -200,9 +217,9 @@ export default function NuevaOrden() {
       flag_pintura: false,
       tipo_repuesto: "Ninguno",
       descripcion_dano: "",
-      horas_dm: 0, horas_reparacion: 0, costo_pintura: 0, costo_repuesto: 0,
+      horas_dm: 0, horas_reparacion: 0, costo_mano_obra: 0, costo_pintura: 0, costo_repuesto: 0,
     }]);
-    setLineasDisplay(prev => [...prev, { costo_repuesto: "", costo_pintura: "" }]);
+    setLineasDisplay(prev => [...prev, { costo_repuesto: "", costo_pintura: "", costo_mano_obra: "" }]);
   };
 
   const updateLinea = (idx, key, val) => {
@@ -225,6 +242,13 @@ export default function NuevaOrden() {
     const num = digits ? parseInt(digits, 10) : 0;
     updateLinea(idx, "costo_pintura", num);
     updateLineaDisplay(idx, "costo_pintura", digits ? num.toLocaleString("es-CR") : "");
+  };
+
+  const handleCostoManoObra = (idx, raw) => {
+    const digits = raw.replace(/\D/g, "");
+    const num = digits ? parseInt(digits, 10) : 0;
+    updateLinea(idx, "costo_mano_obra", num);
+    updateLineaDisplay(idx, "costo_mano_obra", digits ? num.toLocaleString("es-CR") : "");
   };
 
   const removeLinea = (idx) => {
@@ -250,6 +274,40 @@ export default function NuevaOrden() {
       } catch (error) {
         toast({
           title: "No se pudo subir una foto",
+          description: error?.message || "Verifique permisos del bucket de storage y reintente.",
+          variant: "destructive"
+        });
+      }
+    }
+  };
+
+  const handleDocumentoInsUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    for (const file of files) {
+      if (file.type !== "application/pdf") {
+        toast({
+          title: "Archivo inválido",
+          description: "Solo se permiten documentos PDF del INS.",
+          variant: "destructive"
+        });
+        continue;
+      }
+
+      try {
+        const { file_url, persisted_inline, storage_error } = await base44.integrations.Core.UploadFile({ file });
+        setDocumentosIns(prev => [...prev, file_url]);
+        if (persisted_inline) {
+          toast({
+            title: "PDF cargado en modo temporal",
+            description: storage_error
+              ? `Se guardó embebido porque storage no está disponible: ${storage_error}`
+              : "Se guardó embebido porque storage no está disponible.",
+            variant: "destructive"
+          });
+        }
+      } catch (error) {
+        toast({
+          title: "No se pudo subir el PDF",
           description: error?.message || "Verifique permisos del bucket de storage y reintente.",
           variant: "destructive"
         });
@@ -307,6 +365,7 @@ export default function NuevaOrden() {
         monto_autorizado_seguro: Number(form.monto_autorizado_seguro) || 0,
         adelanto_dinero: Number(form.adelanto_dinero) || 0,
         fotos,
+        documentos_ins: documentosIns,
         estado_cotizacion: "Borrador",
         estado_kanban: "Recepción",
         historial_kanban: [{ estacion: "Recepción", fecha: new Date().toISOString(), tecnico: form.evaluador_nombre || "Sistema" }],
@@ -316,14 +375,19 @@ export default function NuevaOrden() {
 
       const lineResults = await Promise.allSettled(
         lineas.map((linea) => {
+          const costoManoObraPorHoras = linea.horas_dm * 15 + linea.horas_reparacion * 20;
+          const costoManoObraFinal = (linea.costo_mano_obra || 0) > 0
+            ? (linea.costo_mano_obra || 0)
+            : costoManoObraPorHoras;
           const subtotal =
-            linea.horas_dm * 15 +
-            linea.horas_reparacion * 20 +
+            costoManoObraFinal +
             (linea.costo_pintura || 0) +
             (linea.costo_repuesto || 0);
 
+          const { costo_mano_obra, ...lineaPayload } = linea;
+
           return base44.entities.LineaAvaluo.create({
-            ...linea,
+            ...lineaPayload,
             orden_id: orden.id,
             subtotal,
             es_ampliacion: false,
@@ -561,26 +625,58 @@ export default function NuevaOrden() {
         </div>
       </div>
 
-      {/* Section 5: Photos */}
+      {/* Section 5: Photos and INS docs */}
       <div className="data-card space-y-4">
         <h2 className="font-heading font-bold text-lg uppercase tracking-wide text-primary border-b border-border pb-2">
-          5. Fotos del Vehículo
+          5. Fotos y Documentación INS
         </h2>
-        <div className="flex flex-wrap gap-3">
-          {fotos.map((url, i) => (
-            <div key={i} className="relative">
-              <img src={url} alt={`Foto ${i+1}`} className="w-24 h-24 object-cover rounded-lg border border-border" />
-              <button type="button" onClick={() => setFotos(f => f.filter((_, j) => j !== i))}
-                className="absolute -top-2 -right-2 w-5 h-5 bg-destructive text-white rounded-full flex items-center justify-center text-xs">
-                <X size={10} />
-              </button>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="space-y-3">
+            <p className="text-sm font-semibold text-foreground">Fotos del Vehículo</p>
+            <div className="flex flex-wrap gap-3">
+              {fotos.map((url, i) => (
+                <div key={i} className="relative">
+                  <img src={url} alt={`Foto ${i+1}`} className="w-24 h-24 object-cover rounded-lg border border-border" />
+                  <button type="button" onClick={() => setFotos(f => f.filter((_, j) => j !== i))}
+                    className="absolute -top-2 -right-2 w-5 h-5 bg-destructive text-white rounded-full flex items-center justify-center text-xs">
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+              <label className="w-24 h-24 border-2 border-dashed border-border rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary transition-colors">
+                <Camera size={20} className="text-muted-foreground" />
+                <span className="text-xs text-muted-foreground mt-1">Agregar</span>
+                <input type="file" accept="image/*" multiple className="hidden" onChange={handleFotoUpload} />
+              </label>
             </div>
-          ))}
-          <label className="w-24 h-24 border-2 border-dashed border-border rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary transition-colors">
-            <Camera size={20} className="text-muted-foreground" />
-            <span className="text-xs text-muted-foreground mt-1">Agregar</span>
-            <input type="file" accept="image/*" multiple className="hidden" onChange={handleFotoUpload} />
-          </label>
+          </div>
+
+          <div className="space-y-3">
+            <p className="text-sm font-semibold text-foreground">Documentación INS (PDF)</p>
+            <div className="space-y-2">
+              {documentosIns.map((url, i) => (
+                <div key={`${url}-${i}`} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/40 px-3 py-2">
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 items-center gap-2 text-sm text-foreground hover:text-primary">
+                    <FileText size={16} className="text-primary flex-shrink-0" />
+                    <span className="truncate">{getStoredFileName(url, `Documento INS ${i + 1}`)}</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setDocumentosIns((prev) => prev.filter((_, j) => j !== i))}
+                    className="flex-shrink-0 rounded-full bg-destructive text-white p-1"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+              <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border px-4 py-5 text-center hover:border-primary transition-colors">
+                <FileText size={20} className="text-muted-foreground" />
+                <span className="mt-2 text-sm font-medium text-foreground">Cargar documentación INS</span>
+                <span className="text-xs text-muted-foreground">Solo PDF. Se usará luego en la vista comparativa.</span>
+                <input type="file" accept="application/pdf" multiple className="hidden" onChange={handleDocumentoInsUpload} />
+              </label>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -676,6 +772,18 @@ export default function NuevaOrden() {
                     <Input
                       value={lineasDisplay[idx]?.costo_repuesto ?? ""}
                       onChange={e => handleCostoRepuesto(idx, e.target.value)}
+                      placeholder="0"
+                      inputMode="numeric"
+                      className="bg-card border-border h-8 text-sm"
+                    />
+                  </div>
+                )}
+                {linea.tipo_repuesto === "UTS" && (
+                  <div>
+                    <label className="form-label">Costo Mano de Obra (₡)</label>
+                    <Input
+                      value={lineasDisplay[idx]?.costo_mano_obra ?? ""}
+                      onChange={e => handleCostoManoObra(idx, e.target.value)}
                       placeholder="0"
                       inputMode="numeric"
                       className="bg-card border-border h-8 text-sm"
