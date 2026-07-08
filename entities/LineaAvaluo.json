@@ -18,6 +18,11 @@
       "type": "string",
       "title": "Categor\u00eda de la Pieza"
     },
+    "cantidad": {
+      "type": "number",
+      "title": "Cantidad",
+      "default": 1
+    },
     "flag_desarmado_montaje": {
       "type": "boolean",
       "title": "D&M (Desarmado y Montaje)",

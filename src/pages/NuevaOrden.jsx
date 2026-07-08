@@ -36,6 +36,14 @@ const getStoredFileName = (value, fallback = "Documento") => {
   }
 };
 
+const getLineaCantidad = (linea) => Math.max(1, Number(linea?.cantidad) || 1);
+
+const getLineaHoras = (linea) =>
+  (Number(linea?.horas_dm) || 0) + (Number(linea?.horas_reparacion) || 0);
+
+const getLineaMontoCotizado = (linea) =>
+  (Number(linea?.costo_pintura) || 0) + ((Number(linea?.costo_repuesto) || 0) * getLineaCantidad(linea));
+
 function PiezaSelector({ piezas, onSelect }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -212,6 +220,7 @@ export default function NuevaOrden() {
       pieza_id: pieza.id,
       pieza_nombre: pieza.nombre,
       pieza_categoria: pieza.categoria,
+      cantidad: 1,
       flag_desarmado_montaje: false,
       flag_reparacion: false,
       flag_pintura: false,
@@ -219,7 +228,7 @@ export default function NuevaOrden() {
       descripcion_dano: "",
       horas_dm: 0, horas_reparacion: 0, costo_mano_obra: 0, costo_pintura: 0, costo_repuesto: 0,
     }]);
-    setLineasDisplay(prev => [...prev, { costo_repuesto: "", costo_pintura: "", costo_mano_obra: "" }]);
+    setLineasDisplay(prev => [...prev, { costo_repuesto: "", costo_pintura: "", cantidad: "1" }]);
   };
 
   const updateLinea = (idx, key, val) => {
@@ -244,11 +253,16 @@ export default function NuevaOrden() {
     updateLineaDisplay(idx, "costo_pintura", digits ? num.toLocaleString("es-CR") : "");
   };
 
-  const handleCostoManoObra = (idx, raw) => {
+  const handleCantidadChange = (idx, raw) => {
     const digits = raw.replace(/\D/g, "");
-    const num = digits ? parseInt(digits, 10) : 0;
-    updateLinea(idx, "costo_mano_obra", num);
-    updateLineaDisplay(idx, "costo_mano_obra", digits ? num.toLocaleString("es-CR") : "");
+    updateLineaDisplay(idx, "cantidad", digits);
+    updateLinea(idx, "cantidad", digits === "" ? "" : parseInt(digits, 10));
+  };
+
+  const handleCantidadBlur = (idx) => {
+    const cantidad = Math.max(1, Number(lineas[idx]?.cantidad) || 1);
+    updateLinea(idx, "cantidad", cantidad);
+    updateLineaDisplay(idx, "cantidad", String(cantidad));
   };
 
   const removeLinea = (idx) => {
@@ -356,6 +370,7 @@ export default function NuevaOrden() {
     })();
 
     try {
+      const montoCotizado = lineas.reduce((sum, linea) => sum + getLineaMontoCotizado(linea), 0);
       const ordenData = {
         ...form,
         fecha_ingreso: fechaIngresoConHora,
@@ -368,6 +383,7 @@ export default function NuevaOrden() {
         documentos_ins: documentosIns,
         estado_cotizacion: "Borrador",
         estado_kanban: "Recepción",
+        monto_cotizado: montoCotizado,
         historial_kanban: [{ estacion: "Recepción", fecha: new Date().toISOString(), tecnico: form.evaluador_nombre || "Sistema" }],
       };
 
@@ -375,19 +391,14 @@ export default function NuevaOrden() {
 
       const lineResults = await Promise.allSettled(
         lineas.map((linea) => {
-          const costoManoObraPorHoras = linea.horas_dm * 15 + linea.horas_reparacion * 20;
-          const costoManoObraFinal = (linea.costo_mano_obra || 0) > 0
-            ? (linea.costo_mano_obra || 0)
-            : costoManoObraPorHoras;
-          const subtotal =
-            costoManoObraFinal +
-            (linea.costo_pintura || 0) +
-            (linea.costo_repuesto || 0);
+          const cantidad = getLineaCantidad(linea);
+          const subtotal = getLineaMontoCotizado({ ...linea, cantidad });
 
           const { costo_mano_obra, ...lineaPayload } = linea;
 
           return base44.entities.LineaAvaluo.create({
             ...lineaPayload,
+            cantidad,
             orden_id: orden.id,
             subtotal,
             es_ampliacion: false,
@@ -697,9 +708,23 @@ export default function NuevaOrden() {
         <div className="space-y-3">
           {lineas.map((linea, idx) => (
             <div key={idx} className="bg-secondary/50 border border-border rounded-lg p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-foreground">{linea.pieza_nombre}</p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p className="font-semibold text-foreground">{linea.pieza_nombre}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Cant.</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={lineasDisplay[idx]?.cantidad ?? String(linea.cantidad || 1)}
+                        onChange={e => handleCantidadChange(idx, e.target.value)}
+                        onBlur={() => handleCantidadBlur(idx)}
+                        onFocus={e => e.target.select()}
+                        className="h-8 w-20 bg-card border-border text-sm"
+                      />
+                    </div>
+                  </div>
                   <p className="text-xs text-muted-foreground">{linea.pieza_categoria}</p>
                 </div>
                 <button type="button" onClick={() => removeLinea(idx)} className="text-destructive hover:text-destructive/80 p-1">
@@ -772,18 +797,6 @@ export default function NuevaOrden() {
                     <Input
                       value={lineasDisplay[idx]?.costo_repuesto ?? ""}
                       onChange={e => handleCostoRepuesto(idx, e.target.value)}
-                      placeholder="0"
-                      inputMode="numeric"
-                      className="bg-card border-border h-8 text-sm"
-                    />
-                  </div>
-                )}
-                {linea.tipo_repuesto === "UTS" && (
-                  <div>
-                    <label className="form-label">Costo Mano de Obra (₡)</label>
-                    <Input
-                      value={lineasDisplay[idx]?.costo_mano_obra ?? ""}
-                      onChange={e => handleCostoManoObra(idx, e.target.value)}
                       placeholder="0"
                       inputMode="numeric"
                       className="bg-card border-border h-8 text-sm"

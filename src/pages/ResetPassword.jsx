@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -10,12 +10,40 @@ import AuthLayout from "@/components/AuthLayout";
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
   const resetToken = searchParams.get("token");
+  const [hashSession, setHashSession] = useState({ accessToken: "", refreshToken: "" });
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    const hash = window.location.hash?.startsWith("#")
+      ? window.location.hash.slice(1)
+      : "";
+
+    if (!hash) return;
+
+    const params = new URLSearchParams(hash);
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    const type = params.get("type");
+
+    if (type === "recovery" && accessToken && refreshToken) {
+      setHashSession({ accessToken, refreshToken });
+      window.history.replaceState(
+        {},
+        document.title,
+        `${window.location.pathname}${window.location.search}`
+      );
+    }
+  }, []);
+
+  const hasRecoveryCredentials = useMemo(() => {
+    return Boolean(resetToken || (hashSession.accessToken && hashSession.refreshToken));
+  }, [resetToken, hashSession]);
+
+  /** @param {React.FormEvent<HTMLFormElement>} e */
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -25,16 +53,18 @@ export default function ResetPassword() {
     }
     setLoading(true);
     try {
-      await base44.auth.resetPassword({ resetToken, newPassword });
+      const session = hashSession.accessToken && hashSession.refreshToken ? hashSession : null;
+      await base44.auth.resetPassword({ resetToken, session, newPassword });
       window.location.href = "/login";
     } catch (err) {
-      setError(err.message || "Failed to reset password");
+      const message = err instanceof Error ? err.message : "Failed to reset password";
+      setError(message);
     } finally {
       setLoading(false);
     }
   };
 
-  if (!resetToken) {
+  if (!hasRecoveryCredentials) {
     return (
       <AuthLayout
         icon={AlertTriangle}

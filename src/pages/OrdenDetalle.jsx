@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState, useEffect } from "react";
+import { Fragment, useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { OrdenTrabajoAPI } from "@/api/OrdenTrabajo";
@@ -8,12 +8,13 @@ import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { StatusChangeWhatsappModal } from "@/components/StatusChangeWhatsappModal";
 import { useToast } from "@/components/ui/use-toast";
 import {
   ArrowLeft, Car, User, Shield, Phone, MapPin, Calendar,
   CheckCircle, Clock, AlertTriangle, Camera, ChevronRight,
-  Package, Wrench, DollarSign, FileText, History, Lock
+  Package, Wrench, DollarSign, FileText, History, Lock, Pencil, Save, X
 } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { formatColones, formatDisplayDateTime } from "@/lib/utils";
@@ -76,6 +77,27 @@ const getStoredFileName = (value, fallback = "Documento") => {
   }
 };
 
+const getLineaCantidad = (linea) => Math.max(1, Number(linea?.cantidad) || 1);
+
+const getLineaHoras = (linea) =>
+  (Number(linea?.horas_dm) || 0) + (Number(linea?.horas_reparacion) || 0);
+
+const getLineaMontoCotizado = (linea) =>
+  (Number(linea?.costo_pintura) || 0) + ((Number(linea?.costo_repuesto) || 0) * getLineaCantidad(linea));
+
+const createLineaDraft = (linea) => ({
+  cantidad: String(getLineaCantidad(linea)),
+  horas_dm: String(Number(linea?.horas_dm) || 0),
+  horas_reparacion: String(Number(linea?.horas_reparacion) || 0),
+  costo_pintura: String(Number(linea?.costo_pintura) || 0),
+  costo_repuesto: String(Number(linea?.costo_repuesto) || 0),
+  flag_desarmado_montaje: Boolean(linea?.flag_desarmado_montaje),
+  flag_reparacion: Boolean(linea?.flag_reparacion),
+  flag_pintura: Boolean(linea?.flag_pintura),
+  tipo_repuesto: linea?.tipo_repuesto || "Ninguno",
+  descripcion_dano: linea?.descripcion_dano || "",
+});
+
 export default function OrdenDetalle() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -95,6 +117,9 @@ export default function OrdenDetalle() {
   const [pendingKanbanHistorial, setPendingKanbanHistorial] = useState([]);
   const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
   const [uploadingDocumentoIns, setUploadingDocumentoIns] = useState(false);
+  const [editingLineaId, setEditingLineaId] = useState(null);
+  const [lineaDraft, setLineaDraft] = useState(null);
+  const [savingLineaId, setSavingLineaId] = useState(null);
 
   useEffect(() => {
     const load = async () => {
@@ -269,7 +294,7 @@ export default function OrdenDetalle() {
             pieza_nombre: linea.pieza_nombre,
             descripcion_dano: linea.descripcion_dano,
             tipo_repuesto: linea.tipo_repuesto,
-            cantidad: 1,
+            cantidad: Math.max(1, Number(linea.cantidad) || 1),
             estado: "Pendiente",
           });
         }
@@ -398,7 +423,111 @@ export default function OrdenDetalle() {
     }
   };
 
-  const totalCotizado = lineas.reduce((sum, l) => sum + (l.subtotal || 0), 0);
+  const startEditLinea = (linea) => {
+    setEditingLineaId(linea.id);
+    setLineaDraft(createLineaDraft(linea));
+  };
+
+  const cancelEditLinea = () => {
+    setEditingLineaId(null);
+    setLineaDraft(null);
+  };
+
+  const updateLineaDraft = (key, value) => {
+    setLineaDraft((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const saveLinea = async (linea) => {
+    if (!lineaDraft) return;
+
+    const payload = {
+      cantidad: Math.max(1, Number(lineaDraft.cantidad) || 1),
+      horas_dm: Number(lineaDraft.horas_dm) || 0,
+      horas_reparacion: Number(lineaDraft.horas_reparacion) || 0,
+      costo_pintura: Number(lineaDraft.costo_pintura) || 0,
+      costo_repuesto: Number(lineaDraft.costo_repuesto) || 0,
+      flag_desarmado_montaje: Boolean(lineaDraft.flag_desarmado_montaje),
+      flag_reparacion: Boolean(lineaDraft.flag_reparacion),
+      flag_pintura: Boolean(lineaDraft.flag_pintura),
+      tipo_repuesto: lineaDraft.tipo_repuesto,
+      descripcion_dano: String(lineaDraft.descripcion_dano || "").trim(),
+    };
+
+    if ((payload.tipo_repuesto === "Nuevo" || payload.tipo_repuesto === "UTS") && !payload.descripcion_dano) {
+      toast({
+        title: "Descripción técnica requerida",
+        description: "Las líneas con repuesto Nuevo o UTS requieren justificación técnica.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    payload.subtotal = getLineaMontoCotizado(payload);
+
+    setSavingLineaId(linea.id);
+    try {
+      await base44.entities.LineaAvaluo.update(linea.id, payload);
+
+      const updatedLineas = lineas.map((current) => current.id === linea.id ? { ...current, ...payload } : current);
+      const montoCotizado = updatedLineas.reduce((sum, current) => sum + getLineaMontoCotizado(current), 0);
+
+      await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
+
+      const compraExistente = compras.find((compra) => compra.linea_avaluo_id === linea.id);
+      const requiereCompra = payload.tipo_repuesto === "Nuevo" || payload.tipo_repuesto === "UTS";
+      const cotizacionAprobada = orden?.estado_cotizacion === "Aprobado" || orden?.estado_cotizacion === "Autorizado por Seguro";
+
+      let updatedCompras = compras;
+
+      if (compraExistente && requiereCompra) {
+        const compraPayload = {
+          pieza_nombre: linea.pieza_nombre,
+          descripcion_dano: payload.descripcion_dano,
+          tipo_repuesto: payload.tipo_repuesto,
+          cantidad: payload.cantidad,
+        };
+        await base44.entities.RequerimientoCompra.update(compraExistente.id, compraPayload);
+        updatedCompras = compras.map((compra) => compra.id === compraExistente.id ? { ...compra, ...compraPayload } : compra);
+      }
+
+      if (compraExistente && !requiereCompra) {
+        await base44.entities.RequerimientoCompra.update(compraExistente.id, { estado: "Cancelado", cantidad: payload.cantidad });
+        updatedCompras = compras.map((compra) => compra.id === compraExistente.id ? { ...compra, estado: "Cancelado", cantidad: payload.cantidad } : compra);
+      }
+
+      if (!compraExistente && requiereCompra && cotizacionAprobada) {
+        const nuevaCompra = await base44.entities.RequerimientoCompra.create({
+          orden_id: id,
+          numero_orden: orden.numero_orden,
+          linea_avaluo_id: linea.id,
+          pieza_nombre: linea.pieza_nombre,
+          descripcion_dano: payload.descripcion_dano,
+          tipo_repuesto: payload.tipo_repuesto,
+          cantidad: payload.cantidad,
+          estado: "Pendiente",
+        });
+        updatedCompras = [...compras, nuevaCompra];
+      }
+
+      setLineas(updatedLineas);
+      setCompras(updatedCompras);
+      setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
+      setEditingLineaId(null);
+      setLineaDraft(null);
+      toast({ title: "Avalúo actualizado", description: "La línea de avalúo fue actualizada." });
+    } catch (error) {
+      toast({
+        title: "No se pudo actualizar el avalúo",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setSavingLineaId(null);
+    }
+  };
+
+  const totalCotizado = lineas.reduce((sum, l) => sum + getLineaMontoCotizado(l), 0);
+  const totalHorasAvaluo = lineas.reduce((sum, l) => sum + getLineaHoras(l), 0);
   const lineasConRepuesto = lineas.filter((l) => l.tipo_repuesto === "Nuevo" || l.tipo_repuesto === "UTS");
 
   if (loading) {
@@ -489,6 +618,10 @@ export default function OrdenDetalle() {
                 </div>
               )}
             </div>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-muted-foreground font-semibold uppercase">Total Horas</p>
+            <p className="text-2xl font-heading font-bold text-foreground">{totalHorasAvaluo}</p>
           </div>
           <div className="text-right">
             <p className="text-xs text-muted-foreground font-semibold uppercase">Total Cotizado</p>
@@ -621,6 +754,10 @@ export default function OrdenDetalle() {
               <span className="font-medium text-green-400">{formatColones(orden.adelanto_dinero || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
             </div>
             <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Total Horas Avalúo</span>
+              <span className="font-bold">{totalHorasAvaluo}</span>
+            </div>
+            <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Total Cotizado</span>
               <span className="font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
             </div>
@@ -636,50 +773,162 @@ export default function OrdenDetalle() {
               <thead>
                 <tr className="border-b border-border bg-secondary/30">
                   <th className="text-left py-3 px-4 text-muted-foreground font-semibold text-xs uppercase">Pieza</th>
+                  <th className="text-center py-3 px-3 text-muted-foreground font-semibold text-xs uppercase">Horas</th>
                   <th className="text-center py-3 px-3 text-muted-foreground font-semibold text-xs uppercase">D&M</th>
                   <th className="text-center py-3 px-3 text-muted-foreground font-semibold text-xs uppercase">Rep.</th>
                   <th className="text-center py-3 px-3 text-muted-foreground font-semibold text-xs uppercase">Pint.</th>
                   <th className="text-left py-3 px-4 text-muted-foreground font-semibold text-xs uppercase">Repuesto</th>
                   <th className="text-left py-3 px-4 text-muted-foreground font-semibold text-xs uppercase hidden lg:table-cell">Descripción</th>
                   <th className="text-right py-3 px-4 text-muted-foreground font-semibold text-xs uppercase">Subtotal</th>
+                  {canEditOrders && <th className="text-right py-3 px-4 text-muted-foreground font-semibold text-xs uppercase">Acciones</th>}
                 </tr>
               </thead>
               <tbody>
                 {lineas.map(l => (
-                  <tr key={l.id} className={`border-b border-border/50 ${l.es_ampliacion ? "bg-purple-500/5" : ""}`}>
-                    <td className="py-3 px-4">
-                      <p className="font-medium">{l.pieza_nombre}</p>
-                      <p className="text-xs text-muted-foreground">{l.pieza_categoria}</p>
-                      {l.es_ampliacion && <span className="text-xs text-purple-400 font-semibold">AMPLIACIÓN</span>}
-                    </td>
-                    <td className="py-3 px-3 text-center">{l.flag_desarmado_montaje ? "✓" : "—"}</td>
-                    <td className="py-3 px-3 text-center">{l.flag_reparacion ? "✓" : "—"}</td>
-                    <td className="py-3 px-3 text-center">{l.flag_pintura ? "✓" : "—"}</td>
-                    <td className="py-3 px-4">
-                      <span className={`station-badge border text-xs ${
-                        l.tipo_repuesto === "Nuevo" ? "bg-orange-500/20 text-orange-400 border-orange-500/30"
-                        : l.tipo_repuesto === "UTS" ? "bg-red-500/20 text-red-400 border-red-500/30"
-                        : l.tipo_repuesto === "Reparación" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
-                        : "bg-secondary text-muted-foreground border-border"
-                      }`}>
-                        {l.tipo_repuesto}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 hidden lg:table-cell text-xs text-muted-foreground max-w-xs truncate">
-                      {l.descripcion_dano || "—"}
-                    </td>
-                    <td className="py-3 px-4 text-right font-semibold text-primary">{formatColones(l.subtotal || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
-                  </tr>
+                  <Fragment key={l.id}>
+                    <tr className={`border-b border-border/50 ${l.es_ampliacion ? "bg-purple-500/5" : ""}`}>
+                      <td className="py-3 px-4">
+                        <p className="font-medium">{l.pieza_nombre}</p>
+                        <p className="text-xs text-muted-foreground">Cantidad: {getLineaCantidad(l)}</p>
+                        <p className="text-xs text-muted-foreground">{l.pieza_categoria}</p>
+                        {l.es_ampliacion && <span className="text-xs text-purple-400 font-semibold">AMPLIACIÓN</span>}
+                      </td>
+                      <td className="py-3 px-3 text-center text-xs text-muted-foreground">
+                        <span>{getLineaHoras(l)} h</span>
+                      </td>
+                      <td className="py-3 px-3 text-center">{l.flag_desarmado_montaje ? "✓" : "—"}</td>
+                      <td className="py-3 px-3 text-center">{l.flag_reparacion ? "✓" : "—"}</td>
+                      <td className="py-3 px-3 text-center">{l.flag_pintura ? "✓" : "—"}</td>
+                      <td className="py-3 px-4">
+                        <span className={`station-badge border text-xs ${
+                          l.tipo_repuesto === "Nuevo" ? "bg-orange-500/20 text-orange-400 border-orange-500/30"
+                          : l.tipo_repuesto === "UTS" ? "bg-red-500/20 text-red-400 border-red-500/30"
+                          : l.tipo_repuesto === "Reparación" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                          : "bg-secondary text-muted-foreground border-border"
+                        }`}>
+                          {l.tipo_repuesto}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 hidden lg:table-cell text-xs text-muted-foreground max-w-xs truncate">
+                        {l.descripcion_dano || "—"}
+                      </td>
+                      <td className="py-3 px-4 text-right font-semibold text-primary">{formatColones(getLineaMontoCotizado(l), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                      {canEditOrders && (
+                        <td className="py-3 px-4 text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => startEditLinea(l)}
+                            disabled={editingLineaId === l.id || Boolean(savingLineaId)}
+                            className="gap-2 text-primary hover:text-primary"
+                          >
+                            <Pencil size={14} /> Editar
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                    {editingLineaId === l.id && lineaDraft && (
+                      <tr className="border-b border-border/50 bg-secondary/10">
+                        <td colSpan={canEditOrders ? 9 : 8} className="px-4 py-4">
+                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                              <div>
+                                <label className="text-xs text-muted-foreground font-semibold uppercase">Cantidad</label>
+                                <Input type="number" min={1} value={lineaDraft.cantidad} onChange={e => updateLineaDraft("cantidad", e.target.value.replace(/\D/g, ""))} className="bg-secondary border-border mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-xs text-muted-foreground font-semibold uppercase">Horas D&M</label>
+                                <Input type="number" min={0} value={lineaDraft.horas_dm} onChange={e => updateLineaDraft("horas_dm", e.target.value.replace(/\D/g, ""))} className="bg-secondary border-border mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-xs text-muted-foreground font-semibold uppercase">Horas Rep.</label>
+                                <Input type="number" min={0} value={lineaDraft.horas_reparacion} onChange={e => updateLineaDraft("horas_reparacion", e.target.value.replace(/\D/g, ""))} className="bg-secondary border-border mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-xs text-muted-foreground font-semibold uppercase">Costo Pintura</label>
+                                <Input type="number" min={0} value={lineaDraft.costo_pintura} onChange={e => updateLineaDraft("costo_pintura", e.target.value.replace(/\D/g, ""))} className="bg-secondary border-border mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-xs text-muted-foreground font-semibold uppercase">Costo Repuesto</label>
+                                <Input type="number" min={0} value={lineaDraft.costo_repuesto} onChange={e => updateLineaDraft("costo_repuesto", e.target.value.replace(/\D/g, ""))} className="bg-secondary border-border mt-1" />
+                              </div>
+                              <div>
+                                <label className="text-xs text-muted-foreground font-semibold uppercase">Tipo Repuesto</label>
+                                <Select value={lineaDraft.tipo_repuesto} onValueChange={value => updateLineaDraft("tipo_repuesto", value)}>
+                                  <SelectTrigger className="bg-secondary border-border mt-1"><SelectValue /></SelectTrigger>
+                                  <SelectContent className="bg-card border-border">
+                                    <SelectItem value="Ninguno">Ninguno</SelectItem>
+                                    <SelectItem value="Nuevo">Nuevo</SelectItem>
+                                    <SelectItem value="Reparación">Reparación</SelectItem>
+                                    <SelectItem value="UTS">UTS</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap gap-4">
+                                {[
+                                  ["flag_desarmado_montaje", "D&M"],
+                                  ["flag_reparacion", "Reparación"],
+                                  ["flag_pintura", "Pintura"],
+                                ].map(([key, label]) => (
+                                  <label key={key} className="flex items-center gap-2 text-sm">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(lineaDraft[key])}
+                                      onChange={e => updateLineaDraft(key, e.target.checked)}
+                                      className="w-4 h-4 accent-yellow-400"
+                                    />
+                                    <span>{label}</span>
+                                  </label>
+                                ))}
+                              </div>
+                              <div>
+                                <label className="text-xs text-muted-foreground font-semibold uppercase">Descripción</label>
+                                <Textarea
+                                  value={lineaDraft.descripcion_dano}
+                                  onChange={e => updateLineaDraft("descripcion_dano", e.target.value)}
+                                  rows={4}
+                                  className="bg-secondary border-border mt-1"
+                                />
+                              </div>
+                              <div className="flex items-center justify-between gap-3 border border-border rounded-md px-3 py-2 bg-card/50">
+                                <div>
+                                  <p className="text-xs uppercase text-muted-foreground font-semibold">Horas Totales</p>
+                                  <p className="font-semibold">{(Number(lineaDraft.horas_dm) || 0) + (Number(lineaDraft.horas_reparacion) || 0)}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-xs uppercase text-muted-foreground font-semibold">Cotizado</p>
+                                  <p className="font-semibold text-primary">{formatColones((Number(lineaDraft.costo_pintura) || 0) + ((Number(lineaDraft.costo_repuesto) || 0) * Math.max(1, Number(lineaDraft.cantidad) || 1)), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                                </div>
+                              </div>
+                              <div className="flex justify-end gap-2">
+                                <Button variant="outline" onClick={cancelEditLinea} disabled={savingLineaId === l.id} className="gap-2">
+                                  <X size={14} /> Cancelar
+                                </Button>
+                                <Button onClick={() => saveLinea(l)} disabled={savingLineaId === l.id} className="gap-2">
+                                  <Save size={14} /> {savingLineaId === l.id ? "Guardando..." : "Guardar"}
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
                 {lineas.length === 0 && (
-                  <tr><td colSpan={7} className="py-12 text-center text-muted-foreground">No hay líneas de daño registradas</td></tr>
+                  <tr><td colSpan={canEditOrders ? 9 : 8} className="py-12 text-center text-muted-foreground">No hay líneas de daño registradas</td></tr>
                 )}
               </tbody>
               {lineas.length > 0 && (
                 <tfoot>
                   <tr className="bg-secondary/30 border-t border-border">
-                    <td colSpan={6} className="py-3 px-4 text-right font-bold uppercase text-sm">Total</td>
+                    <td className="py-3 px-4 text-right font-bold uppercase text-sm">Total</td>
+                    <td className="py-3 px-4 text-center font-bold text-foreground">{totalHorasAvaluo} h</td>
+                    <td colSpan={5} className="py-3 px-4" />
                     <td className="py-3 px-4 text-right font-bold text-primary text-lg">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                    {canEditOrders && <td className="py-3 px-4" />}
                   </tr>
                 </tfoot>
               )}
@@ -786,7 +1035,12 @@ export default function OrdenDetalle() {
                   <div key={linea.id} className="rounded-lg border border-border bg-secondary/20 p-3">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div>
-                        <p className="font-semibold text-foreground">{linea.pieza_nombre}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-semibold text-foreground">{linea.pieza_nombre}</p>
+                          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                            Cant. {Math.max(1, Number(linea.cantidad) || 1)}
+                          </span>
+                        </div>
                         <p className="text-xs text-muted-foreground">{linea.pieza_categoria || "Sin categoría"}</p>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">

@@ -409,11 +409,20 @@ const auth = {
 		return true;
 	},
 
-	async resetPassword({ resetToken, newPassword }) {
-		if (resetToken) {
+	async resetPassword({ resetToken, session, newPassword }) {
+		if (session?.accessToken && session?.refreshToken) {
+			const { error: sessionError } = await supabase.auth.setSession({
+				access_token: session.accessToken,
+				refresh_token: session.refreshToken
+			});
+			if (sessionError) throw toError(sessionError, "Enlace de recuperación inválido o vencido");
+		} else if (resetToken) {
 			const verify = await supabase.auth.verifyOtp({ token: resetToken, type: "recovery" });
 			if (verify.error) throw toError(verify.error, "Token de recuperación inválido");
+		} else {
+			throw new Error("No se encontraron credenciales de recuperación");
 		}
+
 		const { error } = await supabase.auth.updateUser({ password: newPassword });
 		if (error) throw toError(error, "No se pudo restablecer la contraseña");
 		return true;

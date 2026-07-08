@@ -10,17 +10,23 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
 
+  /** @param {React.FormEvent<HTMLFormElement>} e */
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
     setLoading(true);
     try {
       await base44.auth.resetPasswordRequest(email);
-    } catch {
-      // Always show success regardless
+      setSent(true);
+    } catch (err) {
+      const message = err instanceof Error
+        ? err.message
+        : "No se pudo enviar el correo de recuperación. Intente de nuevo en unos minutos.";
+      setError(message);
     } finally {
       setLoading(false);
-      setSent(true);
     }
   };
 
@@ -60,6 +66,12 @@ export default function ForgotPassword() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20">
+                  {error}
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Correo Electrónico</Label>
                 <div className="relative">
@@ -93,6 +105,10 @@ export default function ForgotPassword() {
                 <ArrowLeft className="w-3.5 h-3.5" />
                 Volver a Iniciar Sesión
               </Link>
+
+              <p className="text-xs text-muted-foreground text-center pt-1">
+                Revise spam/promociones y confirme que su correo esté escrito correctamente.
+              </p>
             </form>
           )}
         </div>
