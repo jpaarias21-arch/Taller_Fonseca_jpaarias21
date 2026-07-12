@@ -6,16 +6,54 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Package, Plus, Search, AlertTriangle, TrendingDown, Boxes, DollarSign, Lock, Upload, Download } from "lucide-react";
+import { Package, Plus, Search, AlertTriangle, TrendingDown, Boxes, DollarSign, Lock, Upload, Download, Clock3 } from "lucide-react";
 import { useRole } from "@/lib/useRole";
-import { formatColones } from "@/lib/utils";
+import { formatColones, formatDisplayDateTime } from "@/lib/utils";
 import * as XLSX from "xlsx";
 
 const CATEGORIAS = ["Pintura", "Lija", "Transparente", "Masilla", "Primer", "Thinner", "Repuesto Mecánico", "Herramienta", "Otro"];
 const UNIDADES = ["Litro", "Galón", "Unidad", "Kilo", "Metro", "Caja"];
+const ROTACION_ALERT_DIAS = 90;
+
+const getTodayISODate = () => new Date().toISOString().slice(0, 10);
+
+const parseDateSafe = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const diffDaysFromNow = (date) => {
+  const millis = Date.now() - date.getTime();
+  return Math.floor(millis / (1000 * 60 * 60 * 24));
+};
+
+const normalizeIngresoDate = (value) => {
+  if (!value) return null;
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const dmy = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (dmy) {
+    const [, dd, mm, yyyy] = dmy;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  const parsed = parseDateSafe(raw);
+  return parsed ? parsed.toISOString().slice(0, 10) : null;
+};
 
 const buildProductoForm = (data = {}) => {
   const safeData = data ?? {};
+  const fechaIngreso = safeData.fecha_ingreso
+    ? String(safeData.fecha_ingreso).slice(0, 10)
+    : getTodayISODate();
+
   return {
     nombre: safeData.nombre ?? "",
     codigo: safeData.codigo ?? "",
@@ -26,6 +64,7 @@ const buildProductoForm = (data = {}) => {
     stock_minimo: String(safeData.stock_minimo ?? 0),
     precio_unitario: String(safeData.precio_unitario ?? 0),
     proveedor: safeData.proveedor ?? "",
+    fecha_ingreso: fechaIngreso,
     ...(safeData.id ? { id: safeData.id } : {}),
   };
 };
@@ -35,6 +74,7 @@ const normalizeProductoPayload = (form) => ({
   stock_actual: Number(form.stock_actual || 0),
   stock_minimo: Number(form.stock_minimo || 0),
   precio_unitario: Number(form.precio_unitario || 0),
+  fecha_ingreso: normalizeIngresoDate(form.fecha_ingreso),
 });
 
 const normalizeHeader = (value = "") => String(value)
@@ -53,6 +93,7 @@ const HEADER_ALIASES = {
   stock_minimo: ["stockminimo", "minimo", "stockmin"],
   precio_unitario: ["preciounitario", "precio", "costounitario", "valorunitario"],
   proveedor: ["proveedor", "marca"],
+  fecha_ingreso: ["fechaingreso", "fecha", "fechadeingreso", "ingreso"],
 };
 
 const readExcelNumber = (value, fallback = 0) => {
@@ -102,6 +143,15 @@ const mapExcelRowToProducto = (row) => {
     stock_minimo: Math.max(0, readExcelNumber(pickCell(row, HEADER_ALIASES.stock_minimo), 0)),
     precio_unitario: Math.max(0, readExcelNumber(pickCell(row, HEADER_ALIASES.precio_unitario), 0)),
     proveedor: String(pickCell(row, HEADER_ALIASES.proveedor) ?? "").trim(),
+    fecha_ingreso: (() => {
+      const raw = pickCell(row, HEADER_ALIASES.fecha_ingreso);
+      if (!raw) return getTodayISODate();
+      if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+        return raw.toISOString().slice(0, 10);
+      }
+      const parsed = parseDateSafe(raw);
+      return parsed ? parsed.toISOString().slice(0, 10) : getTodayISODate();
+    })(),
   };
 };
 
@@ -180,6 +230,15 @@ function ProductoModal({ open, onClose, onSave, initial }) {
             <div>
               <label className="form-label">Proveedor</label>
               <Input value={form.proveedor} onChange={e => set("proveedor", e.target.value)} className="bg-secondary border-border" />
+            </div>
+            <div>
+              <label className="form-label">Fecha de Ingreso</label>
+              <Input
+                type="date"
+                value={form.fecha_ingreso}
+                onChange={e => set("fecha_ingreso", e.target.value)}
+                className="bg-secondary border-border"
+              />
             </div>
           </div>
           <div className="flex gap-3 justify-end pt-2">
@@ -275,6 +334,7 @@ export default function Inventario() {
   const { canManageInventory, roleLabel, roleColor } = useRole();
   const [productos, setProductos] = useState([]);
   const [ordenes, setOrdenes] = useState([]);
+  const [movimientos, setMovimientos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterTipo, setFilterTipo] = useState("todos");
@@ -288,30 +348,56 @@ export default function Inventario() {
     Promise.all([
       base44.entities.Inventario.list(),
       base44.entities.OrdenTrabajo.filter({}).then(all => all.filter(o => o.estado_kanban !== "Entregado")),
-    ]).then(([prods, ords]) => {
+      base44.entities.MovimientoInventario.list(),
+    ]).then(([prods, ords, movs]) => {
       setProductos(prods);
       setOrdenes(ords);
+      setMovimientos(movs);
       setLoading(false);
     });
   }, []);
 
   const saveProd = async (form) => {
-    if (form.id) {
-      const current = productos.find((p) => p.id === form.id);
-      const safeForm = {
-        ...form,
-        precio_unitario: current?.precio_unitario ?? form.precio_unitario,
-      };
-      await base44.entities.Inventario.update(form.id, safeForm);
-      setProductos(prev => prev.map(p => p.id === form.id ? { ...p, ...safeForm } : p));
-      toast({ title: "Producto actualizado" });
-    } else {
-      const nuevo = await base44.entities.Inventario.create(form);
-      setProductos(prev => [...prev, nuevo]);
-      toast({ title: "Producto creado" });
+    try {
+      if (form.id) {
+        const current = productos.find((p) => p.id === form.id);
+        const safeForm = {
+          ...form,
+          fecha_ingreso: normalizeIngresoDate(form.fecha_ingreso),
+          precio_unitario: current?.precio_unitario ?? form.precio_unitario,
+        };
+        await base44.entities.Inventario.update(form.id, safeForm);
+        setProductos(prev => prev.map(p => p.id === form.id ? { ...p, ...safeForm } : p));
+        toast({ title: "Producto actualizado" });
+      } else {
+        const fechaIngreso = normalizeIngresoDate(form.fecha_ingreso) || getTodayISODate();
+        const payload = { ...form, fecha_ingreso: fechaIngreso };
+        const nuevo = await base44.entities.Inventario.create(payload);
+
+        let productoPersistido = nuevo;
+        const fechaDevuelta = normalizeIngresoDate(nuevo?.fecha_ingreso);
+        if (nuevo?.id && fechaDevuelta !== fechaIngreso) {
+          try {
+            const updated = await base44.entities.Inventario.update(nuevo.id, { fecha_ingreso: fechaIngreso });
+            if (updated) productoPersistido = updated;
+          } catch (updateError) {
+            console.warn("No se pudo ajustar fecha_ingreso post-creación:", updateError?.message || updateError);
+          }
+        }
+
+        setProductos(prev => [...prev, productoPersistido]);
+        toast({ title: "Producto creado" });
+      }
+      setModalProd(false);
+      setEditProd(null);
+    } catch (error) {
+      console.error("Error guardando producto:", error);
+      toast({
+        title: "No se pudo guardar el producto",
+        description: error?.message || "Verifique los datos e intente de nuevo.",
+        variant: "destructive",
+      });
     }
-    setModalProd(false);
-    setEditProd(null);
   };
 
   const saveMovimiento = async ({ tipo, cantidad, motivo, ordenId, ordenNumero }) => {
@@ -327,7 +413,7 @@ export default function Inventario() {
       toast({ title: "Stock insuficiente", description: "No hay suficiente stock para este despacho.", variant: "destructive" });
       return;
     }
-    await Promise.all([
+    const [_, movimientoCreado] = await Promise.all([
       base44.entities.Inventario.update(prod.id, { stock_actual: nuevoStock }),
       base44.entities.MovimientoInventario.create({
         inventario_id: prod.id,
@@ -341,6 +427,7 @@ export default function Inventario() {
       }),
     ]);
     setProductos(prev => prev.map(p => p.id === prod.id ? { ...p, stock_actual: nuevoStock } : p));
+    setMovimientos((prev) => [...prev, movimientoCreado]);
     toast({ title: "Movimiento registrado", description: `${tipo}: ${cantidad} ${prod.unidad}(s) de ${prod.nombre}` });
     setModalMov(null);
   };
@@ -426,6 +513,52 @@ export default function Inventario() {
     [productos]
   );
 
+  const ultimaFechaMovimientoPorProducto = useMemo(() => {
+    const map = new Map();
+    movimientos.forEach((mov) => {
+      const id = String(mov.inventario_id ?? "");
+      if (!id) return;
+
+      const date = parseDateSafe(mov.created_at || mov.created_date || mov.fecha || mov.fecha_movimiento);
+      if (!date) return;
+
+      const prev = map.get(id);
+      if (!prev || date > prev) {
+        map.set(id, date);
+      }
+    });
+    return map;
+  }, [movimientos]);
+
+  const rotacionLenta = useMemo(() => {
+    return productos
+      .filter((p) => Number(p.stock_actual || 0) > 0)
+      .map((p) => {
+        const movementDate = ultimaFechaMovimientoPorProducto.get(String(p.id));
+        const ingresoDate = parseDateSafe(p.fecha_ingreso);
+        const baseDate = movementDate || ingresoDate;
+        if (!baseDate) return null;
+
+        const dias = diffDaysFromNow(baseDate);
+        if (dias < ROTACION_ALERT_DIAS) return null;
+
+        return {
+          ...p,
+          dias_sin_rotacion: dias,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.dias_sin_rotacion - a.dias_sin_rotacion);
+  }, [productos, ultimaFechaMovimientoPorProducto]);
+
+  const rotacionLentaById = useMemo(() => {
+    const map = new Map();
+    rotacionLenta.forEach((p) => {
+      map.set(String(p.id), p);
+    });
+    return map;
+  }, [rotacionLenta]);
+
   const totalValor = useMemo(
     () => productos.reduce((acc, p) => acc + p.stock_actual * (p.precio_unitario || 0), 0),
     [productos]
@@ -497,7 +630,7 @@ export default function Inventario() {
       )}
 
       {/* Stats Bento */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-card/70 backdrop-blur-md border border-white/10 rounded-xl p-4">
           <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Total SKUs</p>
           <div className="flex items-end gap-2">
@@ -529,6 +662,17 @@ export default function Inventario() {
             <DollarSign size={16} className="text-muted-foreground mb-1" />
           </div>
         </div>
+
+        <div className="bg-card/70 backdrop-blur-md border-l-4 border-orange-500 border-y border-r border-white/10 rounded-xl p-4">
+          <p className="text-orange-300 text-xs uppercase tracking-wider mb-1">Rotación +3 Meses</p>
+          <div className="flex items-end gap-2 text-orange-300">
+            <span className="text-3xl font-heading font-bold">{rotacionLenta.length}</span>
+            <Clock3 size={16} className="mb-1" />
+          </div>
+          <p className="text-[11px] text-orange-200/90 mt-1 truncate" title={rotacionLenta.map((p) => p.nombre).join(", ")}>
+            {rotacionLenta.length > 0 ? rotacionLenta.map((p) => p.nombre).join(", ") : "Sin productos en warning"}
+          </p>
+        </div>
       </div>
 
       {/* Low stock alert banner */}
@@ -536,6 +680,25 @@ export default function Inventario() {
         <div className="flex items-center gap-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-400 text-sm">
           <AlertTriangle size={16} className="flex-shrink-0" />
           <span><strong>{bajoStock.length}</strong> producto(s) con stock bajo: {bajoStock.map(p => p.nombre).join(", ")}</span>
+        </div>
+      )}
+
+      {rotacionLenta.length > 0 && (
+        <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg text-orange-300 text-sm space-y-2">
+          <div className="flex items-center gap-3">
+            <Clock3 size={16} className="flex-shrink-0" />
+            <span><strong>{rotacionLenta.length}</strong> producto(s) con rotación mayor a 3 meses</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {rotacionLenta.map((p) => (
+              <span
+                key={p.id}
+                className="px-2 py-1 rounded-full border border-orange-400/40 bg-orange-500/10 text-xs"
+              >
+                {p.nombre} ({p.dias_sin_rotacion} días)
+              </span>
+            ))}
+          </div>
         </div>
       )}
 
@@ -572,6 +735,7 @@ export default function Inventario() {
                   <th className="text-left py-3 px-4 text-muted-foreground font-semibold text-xs uppercase tracking-wider hidden md:table-cell">Tipo</th>
                   <th className="text-left py-3 px-4 text-muted-foreground font-semibold text-xs uppercase tracking-wider hidden lg:table-cell">Categoría</th>
                   <th className="text-center py-3 px-4 text-muted-foreground font-semibold text-xs uppercase tracking-wider">Stock</th>
+                  <th className="text-center py-3 px-4 text-muted-foreground font-semibold text-xs uppercase tracking-wider">Rotación</th>
                   <th className="text-left py-3 px-4 text-muted-foreground font-semibold text-xs uppercase tracking-wider hidden sm:table-cell">Precio Unit. (₡)</th>
                   <th className="text-right py-3 px-4 text-muted-foreground font-semibold text-xs uppercase tracking-wider">Acciones</th>
                 </tr>
@@ -579,6 +743,7 @@ export default function Inventario() {
               <tbody>
                 {filtered.map((prod, idx) => {
                   const bajo = prod.stock_actual <= prod.stock_minimo;
+                  const rotacionInfo = rotacionLentaById.get(String(prod.id));
                   return (
                     <tr key={prod.id}
                       className={`border-b border-border/40 transition-colors ${bajo ? "bg-yellow-500/5 hover:bg-yellow-500/10" : idx % 2 === 0 ? "hover:bg-secondary/20" : "bg-white/[0.02] hover:bg-secondary/20"}`}>
@@ -589,6 +754,9 @@ export default function Inventario() {
                           <div>
                             <p className="font-medium">{prod.nombre}</p>
                             {prod.codigo && <p className="text-xs text-muted-foreground">{prod.codigo}</p>}
+                            {prod.fecha_ingreso && (
+                              <p className="text-xs text-muted-foreground">Ingreso: {formatDisplayDateTime(prod.fecha_ingreso)}</p>
+                            )}
                           </div>
                           {bajo && <AlertTriangle size={12} className="text-yellow-400 flex-shrink-0" />}
                         </div>
@@ -605,6 +773,17 @@ export default function Inventario() {
                         </span>
                         <span className="text-muted-foreground text-xs ml-1">{prod.unidad}</span>
                         <p className="text-xs text-muted-foreground">mín: {prod.stock_minimo}</p>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {rotacionInfo ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-orange-400/40 bg-orange-500/10 text-orange-300 text-xs">
+                            <Clock3 size={12} /> Warning: {rotacionInfo.dias_sin_rotacion} días
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full border border-emerald-400/30 bg-emerald-500/10 text-emerald-300 text-xs">
+                            OK: menor a 3 meses
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4 hidden sm:table-cell text-muted-foreground">{formatColones(prod.precio_unitario || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                       <td className="py-3 px-4 text-right">
@@ -627,7 +806,7 @@ export default function Inventario() {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={6} className="py-16 text-center text-muted-foreground">
+                  <tr><td colSpan={7} className="py-16 text-center text-muted-foreground">
                     <Package size={32} className="mx-auto mb-2 opacity-30" />
                     {search ? "Sin resultados para la búsqueda" : "No hay productos en el inventario"}
                   </td></tr>
