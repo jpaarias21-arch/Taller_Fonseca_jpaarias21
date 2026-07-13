@@ -9,6 +9,7 @@ import { StatusChangeWhatsappModal } from "@/components/StatusChangeWhatsappModa
 import { Car, AlertTriangle, Shield, User, Eye, X } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { buildStatusWhatsAppMessage, normalizeWhatsAppPhone } from "@/lib/whatsapp";
+import { formatColones } from "@/lib/utils";
 
 const STATIONS = [
   { id: "Recepción", color: "border-blue-500", badge: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
@@ -182,7 +183,9 @@ function KanbanCard({ orden, onMove }) {
         {(orden.adelanto_dinero > 0) && (
           <div className="flex justify-between">
             <span className="text-muted-foreground">Adelanto:</span>
-            <span className="font-medium text-green-400">${Number(orden.adelanto_dinero).toFixed(0)}</span>
+            <span className="font-medium text-green-400">
+              {formatColones(orden.adelanto_dinero, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </span>
           </div>
         )}
         {orden.recomendado_por && (

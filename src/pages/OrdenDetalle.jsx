@@ -14,7 +14,7 @@ import { useToast } from "@/components/ui/use-toast";
 import {
   ArrowLeft, Car, User, Shield, Phone, MapPin, Calendar,
   CheckCircle, Clock, AlertTriangle, Camera, ChevronRight,
-  Package, Wrench, DollarSign, FileText, History, Lock, Pencil, Save, X, Search
+  Package, Wrench, DollarSign, FileText, History, Lock, Pencil, Save, X, Search, Trash2
 } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { formatColones, formatDisplayDateTime } from "@/lib/utils";
@@ -130,6 +130,7 @@ export default function OrdenDetalle() {
   const [editingLineaId, setEditingLineaId] = useState(null);
   const [lineaDraft, setLineaDraft] = useState(null);
   const [savingLineaId, setSavingLineaId] = useState(null);
+  const [deletingLineaId, setDeletingLineaId] = useState(null);
 
   useEffect(() => {
     const load = async () => {
@@ -538,6 +539,48 @@ export default function OrdenDetalle() {
     }
   };
 
+  const deleteLinea = async (linea) => {
+    if (!linea?.id) return;
+
+    const confirmed = window.confirm(`¿Eliminar la línea \"${linea.pieza_nombre}\" del avalúo?`);
+    if (!confirmed) return;
+
+    setDeletingLineaId(linea.id);
+    try {
+      const comprasAsociadas = compras.filter((compra) => compra.linea_avaluo_id === linea.id);
+
+      await Promise.all([
+        base44.entities.LineaAvaluo.delete(linea.id),
+        ...comprasAsociadas.map((compra) => base44.entities.RequerimientoCompra.delete(compra.id)),
+      ]);
+
+      const updatedLineas = lineas.filter((current) => current.id !== linea.id);
+      const updatedCompras = compras.filter((compra) => compra.linea_avaluo_id !== linea.id);
+      const montoCotizado = updatedLineas.reduce((sum, current) => sum + getLineaMontoCotizado(current), 0);
+
+      await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
+
+      setLineas(updatedLineas);
+      setCompras(updatedCompras);
+      setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
+      setEditingLineaId(null);
+      setLineaDraft(null);
+
+      toast({
+        title: "Línea eliminada",
+        description: "La línea fue removida del avalúo correctamente."
+      });
+    } catch (error) {
+      toast({
+        title: "No se pudo eliminar la línea",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setDeletingLineaId(null);
+    }
+  };
+
   const piezasFiltradas = useMemo(() => {
     const q = normalizeText(piezaQuery);
     if (!q) return [];
@@ -937,7 +980,7 @@ export default function OrdenDetalle() {
                             variant="ghost"
                             size="sm"
                             onClick={() => startEditLinea(l)}
-                            disabled={editingLineaId === l.id || Boolean(savingLineaId)}
+                            disabled={editingLineaId === l.id || Boolean(savingLineaId) || Boolean(deletingLineaId)}
                             className="gap-2 text-primary hover:text-primary"
                           >
                             <Pencil size={14} /> Editar
@@ -1020,13 +1063,23 @@ export default function OrdenDetalle() {
                                   <p className="font-semibold text-primary">{formatColones((Number(lineaDraft.costo_pintura) || 0) + ((Number(lineaDraft.costo_repuesto) || 0) * Math.max(1, Number(lineaDraft.cantidad) || 1)), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                                 </div>
                               </div>
-                              <div className="flex justify-end gap-2">
-                                <Button variant="outline" onClick={cancelEditLinea} disabled={savingLineaId === l.id} className="gap-2">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <Button
+                                  variant="destructive"
+                                  onClick={() => deleteLinea(l)}
+                                  disabled={savingLineaId === l.id || deletingLineaId === l.id}
+                                  className="gap-2"
+                                >
+                                  <Trash2 size={14} /> {deletingLineaId === l.id ? "Eliminando..." : "Eliminar línea"}
+                                </Button>
+                                <div className="flex gap-2">
+                                <Button variant="outline" onClick={cancelEditLinea} disabled={savingLineaId === l.id || deletingLineaId === l.id} className="gap-2">
                                   <X size={14} /> Cancelar
                                 </Button>
-                                <Button onClick={() => saveLinea(l)} disabled={savingLineaId === l.id} className="gap-2">
+                                <Button onClick={() => saveLinea(l)} disabled={savingLineaId === l.id || deletingLineaId === l.id} className="gap-2">
                                   <Save size={14} /> {savingLineaId === l.id ? "Guardando..." : "Guardar"}
                                 </Button>
+                                </div>
                               </div>
                             </div>
                           </div>
