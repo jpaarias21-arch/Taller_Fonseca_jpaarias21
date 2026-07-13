@@ -6,7 +6,7 @@ import { OrdenTrabajoAPI } from "@/api/OrdenTrabajo";
 import { WhatsAppAPI } from "@/api/WhatsApp";
 import { useToast } from "@/components/ui/use-toast";
 import { StatusChangeWhatsappModal } from "@/components/StatusChangeWhatsappModal";
-import { Car, AlertTriangle, Shield, User, Eye, X } from "lucide-react";
+import { Car, AlertTriangle, Shield, User, Eye, X, Trash2 } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { buildStatusWhatsAppMessage, normalizeWhatsAppPhone } from "@/lib/whatsapp";
 import { formatColones } from "@/lib/utils";
@@ -26,15 +26,16 @@ const STATIONS = [
 
 const OPERATIVE = ["Desarmado", "Enderezado", "Preparación", "Cabina de Pintura", "Armado", "Pulido", "Control de Calidad", "Entregado"];
 
-function KanbanCard({ orden, onMove }) {
+function KanbanCard({ orden, onMove, onDelete }) {
   const { toast } = useToast();
-  const { canMoveKanban } = useRole();
+  const { canMoveKanban, canEditOrders } = useRole();
   const [blocked, setBlocked] = useState(false);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [pendingStatus, setPendingStatus] = useState("");
   const [pendingMessage, setPendingMessage] = useState("");
   const [pendingHistorial, setPendingHistorial] = useState([]);
   const [submittingStatusChange, setSubmittingStatusChange] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const currentIdx = STATIONS.findIndex(s => s.id === orden.estado_kanban);
   const isApproved = orden.estado_cotizacion === "Aprobado" || orden.estado_cotizacion === "Autorizado por Seguro";
 
@@ -143,6 +144,28 @@ function KanbanCard({ orden, onMove }) {
 
   const stationInfo = STATIONS.find(s => s.id === orden.estado_kanban);
 
+  const handleDelete = async () => {
+    const confirmed = window.confirm(`¿Eliminar la orden ${orden.numero_orden || orden.placa || "seleccionada"}?`);
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      await onDelete(orden);
+      toast({
+        title: "Orden eliminada",
+        description: "La orden fue eliminada correctamente."
+      });
+    } catch (error) {
+      toast({
+        title: "No se pudo eliminar",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className={`kanban-card border-l-4 ${stationInfo?.color || "border-border"}`}>
       {/* Header */}
@@ -155,9 +178,22 @@ function KanbanCard({ orden, onMove }) {
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">{orden.marca} {orden.modelo} {orden.anio}</p>
         </div>
-        <Link to={`/ordenes/${orden.id}`} className="text-muted-foreground hover:text-primary p-0.5">
-          <Eye size={14} />
-        </Link>
+        <div className="flex items-center gap-1">
+          {canEditOrders && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="text-destructive hover:text-destructive/80 p-0.5"
+              title="Eliminar orden"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+          <Link to={`/ordenes/${orden.id}`} className="text-muted-foreground hover:text-primary p-0.5">
+            <Eye size={14} />
+          </Link>
+        </div>
       </div>
 
       {/* Client */}
@@ -269,6 +305,21 @@ export default function Kanban() {
     ).filter(o => o.estado_kanban !== "Entregado"));
   };
 
+  const handleDeleteOrder = async (orden) => {
+    const [lineas, compras] = await Promise.all([
+      base44.entities.LineaAvaluo.filter({ orden_id: orden.id }),
+      base44.entities.RequerimientoCompra.filter({ orden_id: orden.id })
+    ]);
+
+    await Promise.all([
+      ...lineas.map((linea) => base44.entities.LineaAvaluo.delete(linea.id)),
+      ...compras.map((compra) => base44.entities.RequerimientoCompra.delete(compra.id))
+    ]);
+
+    await base44.entities.OrdenTrabajo.delete(orden.id);
+    setOrdenes((prev) => prev.filter((item) => item.id !== orden.id));
+  };
+
   const cardsByStation = useMemo(() => {
     const grouped = {};
     for (const station of STATIONS) grouped[station.id] = [];
@@ -312,7 +363,7 @@ export default function Kanban() {
                 {/* Cards */}
                 <div className="min-h-32 bg-secondary/20 rounded-b-lg border border-border border-t-0 p-2 space-y-2">
                   {cards.map(orden => (
-                    <KanbanCard key={orden.id} orden={orden} onMove={handleMove} />
+                    <KanbanCard key={orden.id} orden={orden} onMove={handleMove} onDelete={handleDeleteOrder} />
                   ))}
                   {cards.length === 0 && (
                     <div className="text-center py-6 text-muted-foreground text-xs opacity-50">

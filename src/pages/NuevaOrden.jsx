@@ -331,33 +331,24 @@ export default function NuevaOrden() {
 
   const validateAndSave = async () => {
     setSubmitted(true);
-    // Validate required fields
-    if (!form.placa || !form.marca || !form.modelo || !form.cliente_nombre || !form.cliente_telefono) {
-      toast({ title: "Campos requeridos", description: "Complete los datos del vehículo y cliente.", variant: "destructive" });
-      return;
-    }
-    if (!form.fecha_ingreso) {
-      toast({ title: "Fecha requerida", description: "Ingrese la fecha de ingreso.", variant: "destructive" });
-      return;
-    }
-    // Validate lineas: tipo Nuevo o UTS requiere descripcion_dano
-    for (let i = 0; i < lineas.length; i++) {
-      const l = lineas[i];
-      if ((l.tipo_repuesto === "Nuevo" || l.tipo_repuesto === "UTS") && !l.descripcion_dano?.trim()) {
-        toast({
-          title: "Descripción técnica requerida",
-          description: `La pieza "${l.pieza_nombre}" tiene tipo Nuevo/UTS. Debe ingresar la justificación técnica del daño.`,
-          variant: "destructive"
-        });
-        return;
-      }
-    }
+
+    const fechaBase = new Date().toISOString().split("T")[0];
+    const formCompleto = {
+      ...form,
+      placa: String(form.placa || "PENDIENTE").trim().toUpperCase(),
+      marca: String(form.marca || "Pendiente").trim(),
+      modelo: String(form.modelo || "Pendiente").trim(),
+      anio: Number(form.anio) || new Date().getFullYear(),
+      cliente_nombre: String(form.cliente_nombre || "Cliente pendiente").trim(),
+      cliente_telefono: String(form.cliente_telefono || "0000-0000").trim(),
+      fecha_ingreso: String(form.fecha_ingreso || fechaBase).trim(),
+    };
 
     setSaving(true);
     const numeroOrden = `OT-${Date.now().toString().slice(-6)}`;
 
     const fechaIngresoConHora = (() => {
-      const raw = String(form.fecha_ingreso || "").trim();
+      const raw = String(formCompleto.fecha_ingreso || "").trim();
       if (!raw) return raw;
       if (raw.includes("T")) return raw;
 
@@ -372,19 +363,19 @@ export default function NuevaOrden() {
     try {
       const montoCotizado = lineas.reduce((sum, linea) => sum + getLineaMontoCotizado(linea), 0);
       const ordenData = {
-        ...form,
+        ...formCompleto,
         fecha_ingreso: fechaIngresoConHora,
         numero_orden: numeroOrden,
-        kilometraje: Number(form.kilometraje) || 0,
-        anio: Number(form.anio),
-        monto_autorizado_seguro: Number(form.monto_autorizado_seguro) || 0,
-        adelanto_dinero: Number(form.adelanto_dinero) || 0,
+        kilometraje: Number(formCompleto.kilometraje) || 0,
+        anio: Number(formCompleto.anio) || new Date().getFullYear(),
+        monto_autorizado_seguro: Number(formCompleto.monto_autorizado_seguro) || 0,
+        adelanto_dinero: Number(formCompleto.adelanto_dinero) || 0,
         fotos,
         documentos_ins: documentosIns,
         estado_cotizacion: "Borrador",
         estado_kanban: "Recepción",
         monto_cotizado: montoCotizado,
-        historial_kanban: [{ estacion: "Recepción", fecha: new Date().toISOString(), tecnico: form.evaluador_nombre || "Sistema" }],
+        historial_kanban: [{ estacion: "Recepción", fecha: new Date().toISOString(), tecnico: formCompleto.evaluador_nombre || "Sistema" }],
       };
 
       const orden = await base44.entities.OrdenTrabajo.create(ordenData);
@@ -393,11 +384,14 @@ export default function NuevaOrden() {
         lineas.map((linea) => {
           const cantidad = getLineaCantidad(linea);
           const subtotal = getLineaMontoCotizado({ ...linea, cantidad });
+          const requiereDescripcion = linea.tipo_repuesto === "Nuevo" || linea.tipo_repuesto === "UTS";
+          const descripcion_dano = String(linea.descripcion_dano || "").trim() || (requiereDescripcion ? "Pendiente por completar" : "");
 
           const { costo_mano_obra, ...lineaPayload } = linea;
 
           return base44.entities.LineaAvaluo.create({
             ...lineaPayload,
+            descripcion_dano,
             cantidad,
             orden_id: orden.id,
             subtotal,

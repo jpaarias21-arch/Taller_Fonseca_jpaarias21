@@ -2,12 +2,13 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
-import { Plus, Search, Car, Filter, ArrowRight } from "lucide-react";
+import { Plus, Search, Car, Filter, ArrowRight, Trash2 } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { formatDisplayDateTime } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/components/ui/use-toast";
 
 // Color de barra lateral por estado cotización
 const BARRA_COLOR = {
@@ -41,11 +42,13 @@ const KANBAN_COLOR = {
 };
 
 export default function Ordenes() {
-  const { canCreateOrder } = useRole();
+  const { canCreateOrder, canEditOrders } = useRole();
+  const { toast } = useToast();
   const [ordenes, setOrdenes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterEstado, setFilterEstado] = useState("todos");
+  const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
     base44.entities.OrdenTrabajo.list("-created_date", 200).then(data => {
@@ -67,6 +70,40 @@ export default function Ordenes() {
       return matchSearch && matchEstado;
     });
   }, [ordenes, searchLower, filterEstado]);
+
+  const handleDeleteOrder = async (orden) => {
+    const confirmed = window.confirm(`¿Eliminar la orden ${orden.numero_orden || orden.placa || "seleccionada"}?`);
+    if (!confirmed) return;
+
+    setDeletingId(orden.id);
+    try {
+      const [lineas, compras] = await Promise.all([
+        base44.entities.LineaAvaluo.filter({ orden_id: orden.id }),
+        base44.entities.RequerimientoCompra.filter({ orden_id: orden.id })
+      ]);
+
+      await Promise.all([
+        ...lineas.map((linea) => base44.entities.LineaAvaluo.delete(linea.id)),
+        ...compras.map((compra) => base44.entities.RequerimientoCompra.delete(compra.id))
+      ]);
+
+      await base44.entities.OrdenTrabajo.delete(orden.id);
+      setOrdenes((prev) => prev.filter((item) => item.id !== orden.id));
+
+      toast({
+        title: "Orden eliminada",
+        description: "La orden fue eliminada correctamente."
+      });
+    } catch (error) {
+      toast({
+        title: "No se pudo eliminar",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -182,11 +219,23 @@ export default function Ordenes() {
                       <span className={`text-xs font-semibold ${kanbanColor}`}>
                         {orden.estado_kanban || "Recepción"}
                       </span>
-                      <Link to={`/ordenes/${orden.id}`}>
-                        <button className="flex items-center gap-1 text-primary text-xs font-semibold hover:underline group-hover:gap-2 transition-all">
-                          Ver Detalles <ArrowRight size={13} />
-                        </button>
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        {canEditOrders && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteOrder(orden)}
+                            disabled={deletingId === orden.id}
+                            className="flex items-center gap-1 text-destructive text-xs font-semibold hover:underline disabled:opacity-60"
+                          >
+                            <Trash2 size={13} /> {deletingId === orden.id ? "Eliminando..." : "Eliminar"}
+                          </button>
+                        )}
+                        <Link to={`/ordenes/${orden.id}`}>
+                          <button className="flex items-center gap-1 text-primary text-xs font-semibold hover:underline group-hover:gap-2 transition-all">
+                            Ver Detalles <ArrowRight size={13} />
+                          </button>
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 </div>

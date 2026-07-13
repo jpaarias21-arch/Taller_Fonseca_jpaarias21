@@ -976,15 +976,26 @@ export default function OrdenDetalle() {
                       <td className="py-3 px-4 text-right font-semibold text-primary">{formatColones(getLineaMontoCotizado(l), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                       {canEditOrders && (
                         <td className="py-3 px-4 text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => startEditLinea(l)}
-                            disabled={editingLineaId === l.id || Boolean(savingLineaId) || Boolean(deletingLineaId)}
-                            className="gap-2 text-primary hover:text-primary"
-                          >
-                            <Pencil size={14} /> Editar
-                          </Button>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => startEditLinea(l)}
+                              disabled={editingLineaId === l.id || Boolean(savingLineaId) || Boolean(deletingLineaId)}
+                              className="gap-2 text-primary hover:text-primary"
+                            >
+                              <Pencil size={14} /> Editar
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => deleteLinea(l)}
+                              disabled={Boolean(savingLineaId) || Boolean(deletingLineaId)}
+                              className="gap-2 text-destructive hover:text-destructive"
+                            >
+                              <Trash2 size={14} /> {deletingLineaId === l.id ? "Eliminando..." : "Eliminar"}
+                            </Button>
+                          </div>
                         </td>
                       )}
                     </tr>
