@@ -92,6 +92,12 @@ const getLineaHoras = (linea) =>
 const getLineaMontoCotizado = (linea) =>
   (Number(linea?.costo_pintura) || 0) + ((Number(linea?.costo_repuesto) || 0) * getLineaCantidad(linea));
 
+const getManoObraConcepto = (item) =>
+  String(item?.concepto || item?.descripcion || item?.nombre || item?.detalle || "").trim();
+
+const getManoObraMonto = (item) =>
+  Number(item?.monto ?? item?.total ?? item?.precio ?? 0) || 0;
+
 const createLineaDraft = (linea) => ({
   cantidad: String(getLineaCantidad(linea)),
   horas_dm: String(Number(linea?.horas_dm) || 0),
@@ -112,6 +118,7 @@ export default function OrdenDetalle() {
   const { canApproveQuote, canMoveKanban, canEditOrders } = useRole();
   const [orden, setOrden] = useState(null);
   const [lineas, setLineas] = useState([]);
+  const [manoObraItems, setManoObraItems] = useState([]);
   const [compras, setCompras] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("info");
@@ -131,6 +138,39 @@ export default function OrdenDetalle() {
   const [lineaDraft, setLineaDraft] = useState(null);
   const [savingLineaId, setSavingLineaId] = useState(null);
   const [deletingLineaId, setDeletingLineaId] = useState(null);
+  const [manoObraDraft, setManoObraDraft] = useState({ concepto: "", monto: "" });
+  const [addingManoObra, setAddingManoObra] = useState(false);
+  const [deletingManoObraId, setDeletingManoObraId] = useState(null);
+  const [editingAvaluo, setEditingAvaluo] = useState(false);
+  const [savingAvaluo, setSavingAvaluo] = useState(false);
+  const [avaluoDraft, setAvaluoDraft] = useState(null);
+
+  const createAvaluoDraft = (data) => ({
+    placa: String(data?.placa || ""),
+    marca: String(data?.marca || ""),
+    modelo: String(data?.modelo || ""),
+    anio: String(data?.anio || ""),
+    color: String(data?.color || ""),
+    codigo_pintura: String(data?.codigo_pintura || ""),
+    kilometraje: String(data?.kilometraje || ""),
+    numero_predio: String(data?.numero_predio || ""),
+    cliente_nombre: String(data?.cliente_nombre || ""),
+    cliente_telefono: String(data?.cliente_telefono || ""),
+    cliente_cedula: String(data?.cliente_cedula || ""),
+    lugar_procedencia: String(data?.lugar_procedencia || ""),
+    recomendado_por: String(data?.recomendado_por || ""),
+    evaluador_nombre: String(data?.evaluador_nombre || ""),
+    recibidor_nombre: String(data?.recibidor_nombre || ""),
+    enderezador_nombre: String(data?.enderezador_nombre || ""),
+    descripcion_danos: String(data?.descripcion_danos || ""),
+    notas_internas: String(data?.notas_internas || ""),
+  });
+
+  const calcularTotalCotizado = (lineasRows, manoObraRows) => {
+    const totalLineas = (lineasRows || []).reduce((sum, item) => sum + getLineaMontoCotizado(item), 0);
+    const totalManoObra = (manoObraRows || []).reduce((sum, item) => sum + getManoObraMonto(item), 0);
+    return totalLineas + totalManoObra;
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -140,14 +180,29 @@ export default function OrdenDetalle() {
         base44.entities.RequerimientoCompra.list("-created_date", 200).then(all => all.filter(r => r.orden_id === id)),
         base44.entities.PiezaCatalogo.list("nombre", 1000).catch(() => []),
       ]);
+
+      const { data: manoObraData } = await supabase
+        .from("mano_obra")
+        .select("*")
+        .eq("orden_id", id)
+        .order("created_at", { ascending: true });
+
       setOrden(ords[0] || null);
       setLineas(lins);
       setCompras(reqs);
       setPiezasCatalogo(piezas || []);
+      setManoObraItems(Array.isArray(manoObraData) ? manoObraData : []);
       setLoading(false);
     };
     load();
   }, [id]);
+
+  useEffect(() => {
+    if (!orden) return;
+    if (!editingAvaluo) {
+      setAvaluoDraft(createAvaluoDraft(orden));
+    }
+  }, [orden, editingAvaluo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -482,7 +537,7 @@ export default function OrdenDetalle() {
       await base44.entities.LineaAvaluo.update(linea.id, payload);
 
       const updatedLineas = lineas.map((current) => current.id === linea.id ? { ...current, ...payload } : current);
-      const montoCotizado = updatedLineas.reduce((sum, current) => sum + getLineaMontoCotizado(current), 0);
+      const montoCotizado = calcularTotalCotizado(updatedLineas, manoObraItems);
 
       await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
 
@@ -556,7 +611,7 @@ export default function OrdenDetalle() {
 
       const updatedLineas = lineas.filter((current) => current.id !== linea.id);
       const updatedCompras = compras.filter((compra) => compra.linea_avaluo_id !== linea.id);
-      const montoCotizado = updatedLineas.reduce((sum, current) => sum + getLineaMontoCotizado(current), 0);
+      const montoCotizado = calcularTotalCotizado(updatedLineas, manoObraItems);
 
       await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
 
@@ -630,7 +685,7 @@ export default function OrdenDetalle() {
 
       const nuevaLinea = await base44.entities.LineaAvaluo.create(payload);
       const updatedLineas = [...lineas, nuevaLinea];
-      const montoCotizado = updatedLineas.reduce((sum, current) => sum + getLineaMontoCotizado(current), 0);
+      const montoCotizado = calcularTotalCotizado(updatedLineas, manoObraItems);
 
       await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
 
@@ -649,7 +704,156 @@ export default function OrdenDetalle() {
     }
   };
 
-  const totalCotizado = lineas.reduce((sum, l) => sum + getLineaMontoCotizado(l), 0);
+  const agregarManoObra = async () => {
+    const concepto = String(manoObraDraft.concepto || "").trim();
+    const monto = Number(String(manoObraDraft.monto || "").replace(/[^\d]/g, "")) || 0;
+
+    if (!concepto) {
+      toast({
+        title: "Concepto requerido",
+        description: "Ingrese un concepto para la mano de obra.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (monto <= 0) {
+      toast({
+        title: "Monto inválido",
+        description: "Ingrese un monto mayor a cero.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setAddingManoObra(true);
+    try {
+      const insertPayload = {
+        orden_id: id,
+        concepto,
+        monto,
+      };
+
+      const { data, error } = await supabase
+        .from("mano_obra")
+        .insert(insertPayload)
+        .select("*")
+        .single();
+
+      if (error) throw error;
+
+      const updatedManoObra = [...manoObraItems, data];
+      const montoCotizado = calcularTotalCotizado(lineas, updatedManoObra);
+
+      await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
+
+      setManoObraItems(updatedManoObra);
+      setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
+      setManoObraDraft({ concepto: "", monto: "" });
+      toast({ title: "Mano de obra agregada", description: "El rubro fue agregado al avalúo." });
+    } catch (error) {
+      toast({
+        title: "No se pudo agregar mano de obra",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setAddingManoObra(false);
+    }
+  };
+
+  const deleteManoObra = async (item) => {
+    if (!item?.id) return;
+
+    const confirmed = window.confirm(`¿Eliminar el rubro de mano de obra \"${getManoObraConcepto(item) || "sin concepto"}\"?`);
+    if (!confirmed) return;
+
+    setDeletingManoObraId(item.id);
+    try {
+      const { error } = await supabase.from("mano_obra").delete().eq("id", item.id);
+      if (error) throw error;
+
+      const updatedManoObra = manoObraItems.filter((current) => current.id !== item.id);
+      const montoCotizado = calcularTotalCotizado(lineas, updatedManoObra);
+
+      await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
+
+      setManoObraItems(updatedManoObra);
+      setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
+      toast({ title: "Mano de obra eliminada", description: "El rubro fue eliminado." });
+    } catch (error) {
+      toast({
+        title: "No se pudo eliminar mano de obra",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setDeletingManoObraId(null);
+    }
+  };
+
+  const startEditAvaluo = () => {
+    setAvaluoDraft(createAvaluoDraft(orden));
+    setEditingAvaluo(true);
+  };
+
+  const cancelEditAvaluo = () => {
+    setEditingAvaluo(false);
+    setAvaluoDraft(createAvaluoDraft(orden));
+  };
+
+  const updateAvaluoDraft = (key, value) => {
+    setAvaluoDraft((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const saveAvaluo = async () => {
+    if (!avaluoDraft) return;
+
+    const payload = {
+      placa: String(avaluoDraft.placa || "").trim().toUpperCase(),
+      marca: String(avaluoDraft.marca || "").trim(),
+      modelo: String(avaluoDraft.modelo || "").trim(),
+      anio: Number(String(avaluoDraft.anio || "").replace(/[^\d]/g, "")) || null,
+      color: String(avaluoDraft.color || "").trim(),
+      codigo_pintura: String(avaluoDraft.codigo_pintura || "").trim(),
+      kilometraje: Number(String(avaluoDraft.kilometraje || "").replace(/[^\d]/g, "")) || 0,
+      numero_predio: String(avaluoDraft.numero_predio || "").trim(),
+      cliente_nombre: String(avaluoDraft.cliente_nombre || "").trim(),
+      cliente_telefono: String(avaluoDraft.cliente_telefono || "").trim(),
+      cliente_cedula: String(avaluoDraft.cliente_cedula || "").trim(),
+      lugar_procedencia: String(avaluoDraft.lugar_procedencia || "").trim(),
+      recomendado_por: String(avaluoDraft.recomendado_por || "").trim(),
+      evaluador_nombre: String(avaluoDraft.evaluador_nombre || "").trim(),
+      recibidor_nombre: String(avaluoDraft.recibidor_nombre || "").trim(),
+      enderezador_nombre: String(avaluoDraft.enderezador_nombre || "").trim(),
+      descripcion_danos: String(avaluoDraft.descripcion_danos || ""),
+      notas_internas: String(avaluoDraft.notas_internas || ""),
+    };
+
+    setSavingAvaluo(true);
+    try {
+      await base44.entities.OrdenTrabajo.update(id, payload);
+      setOrden((prev) => ({ ...prev, ...payload }));
+      setEditingAvaluo(false);
+      toast({
+        title: "Avalúo actualizado",
+        description: "Se guardaron los cambios generales del avalúo."
+      });
+    } catch (error) {
+      toast({
+        title: "No se pudo guardar",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setSavingAvaluo(false);
+    }
+  };
+
+  const lineasDanio = lineas;
+  const totalManoObra = manoObraItems.reduce((sum, item) => sum + getManoObraMonto(item), 0);
+
+  const totalCotizado = calcularTotalCotizado(lineas, manoObraItems);
   const totalHorasAvaluo = lineas.reduce((sum, l) => sum + getLineaHoras(l), 0);
   const lineasConRepuesto = lineas.filter((l) => l.tipo_repuesto === "Nuevo" || l.tipo_repuesto === "UTS");
 
@@ -796,7 +1000,76 @@ export default function OrdenDetalle() {
 
       {/* Tab: Info */}
       {tab === "info" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-4">
+          {canEditOrders && (
+            <div className="flex justify-end gap-2">
+              {!editingAvaluo ? (
+                <Button onClick={startEditAvaluo} className="gap-2">
+                  <Pencil size={14} /> Editar avalúo
+                </Button>
+              ) : (
+                <>
+                  <Button variant="outline" onClick={cancelEditAvaluo} disabled={savingAvaluo} className="gap-2">
+                    <X size={14} /> Cancelar
+                  </Button>
+                  <Button onClick={saveAvaluo} disabled={savingAvaluo} className="gap-2">
+                    <Save size={14} /> {savingAvaluo ? "Guardando..." : "Guardar cambios"}
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+
+          {editingAvaluo && avaluoDraft && (
+            <div className="data-card space-y-4">
+              <h3 className="font-heading font-bold uppercase tracking-wide">Edición General del Avalúo</h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <Input value={avaluoDraft.placa} onChange={(e) => updateAvaluoDraft("placa", e.target.value)} placeholder="Placa" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.marca} onChange={(e) => updateAvaluoDraft("marca", e.target.value)} placeholder="Marca" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.modelo} onChange={(e) => updateAvaluoDraft("modelo", e.target.value)} placeholder="Modelo" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.anio} onChange={(e) => updateAvaluoDraft("anio", e.target.value.replace(/[^\d]/g, ""))} placeholder="Año" className="bg-secondary border-border" />
+
+                <Input value={avaluoDraft.color} onChange={(e) => updateAvaluoDraft("color", e.target.value)} placeholder="Color" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.codigo_pintura} onChange={(e) => updateAvaluoDraft("codigo_pintura", e.target.value)} placeholder="Código pintura" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.kilometraje} onChange={(e) => updateAvaluoDraft("kilometraje", e.target.value.replace(/[^\d]/g, ""))} placeholder="Kilometraje" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.numero_predio} onChange={(e) => updateAvaluoDraft("numero_predio", e.target.value)} placeholder="N° predio" className="bg-secondary border-border" />
+
+                <Input value={avaluoDraft.cliente_nombre} onChange={(e) => updateAvaluoDraft("cliente_nombre", e.target.value)} placeholder="Nombre cliente" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.cliente_telefono} onChange={(e) => updateAvaluoDraft("cliente_telefono", e.target.value)} placeholder="Teléfono" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.cliente_cedula} onChange={(e) => updateAvaluoDraft("cliente_cedula", e.target.value)} placeholder="Cédula" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.lugar_procedencia} onChange={(e) => updateAvaluoDraft("lugar_procedencia", e.target.value)} placeholder="Procedencia" className="bg-secondary border-border" />
+
+                <Input value={avaluoDraft.recomendado_por} onChange={(e) => updateAvaluoDraft("recomendado_por", e.target.value)} placeholder="Recomendado por" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.evaluador_nombre} onChange={(e) => updateAvaluoDraft("evaluador_nombre", e.target.value)} placeholder="Evaluador" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.recibidor_nombre} onChange={(e) => updateAvaluoDraft("recibidor_nombre", e.target.value)} placeholder="Recibidor" className="bg-secondary border-border" />
+                <Input value={avaluoDraft.enderezador_nombre} onChange={(e) => updateAvaluoDraft("enderezador_nombre", e.target.value)} placeholder="Enderezador" className="bg-secondary border-border" />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground font-semibold uppercase">Observaciones del cliente</label>
+                  <Textarea
+                    rows={4}
+                    value={avaluoDraft.descripcion_danos}
+                    onChange={(e) => updateAvaluoDraft("descripcion_danos", e.target.value)}
+                    className="bg-secondary border-border mt-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground font-semibold uppercase">Notas internas</label>
+                  <Textarea
+                    rows={4}
+                    value={avaluoDraft.notas_internas}
+                    onChange={(e) => updateAvaluoDraft("notas_internas", e.target.value)}
+                    className="bg-secondary border-border mt-1"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Vehicle */}
           <div className="data-card space-y-3">
             <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
@@ -885,6 +1158,18 @@ export default function OrdenDetalle() {
               <span className="font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
             </div>
           </div>
+
+          <div className="data-card space-y-3 md:col-span-2">
+            <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
+              <FileText size={16} className="text-primary" /> Observaciones del Cliente
+            </h3>
+            <div className="rounded-md border border-border bg-secondary/20 p-4 min-h-24">
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                {String(orden.descripcion_danos || "").trim() || "Sin observaciones del cliente."}
+              </p>
+            </div>
+          </div>
+          </div>
         </div>
       )}
 
@@ -942,7 +1227,7 @@ export default function OrdenDetalle() {
                 </tr>
               </thead>
               <tbody>
-                {lineas.map(l => (
+                {lineasDanio.map(l => (
                   <Fragment key={l.id}>
                     <tr className={`border-b border-border/50 ${l.es_ampliacion ? "bg-purple-500/5" : ""}`}>
                       <td className="py-3 px-4">
@@ -1099,7 +1384,7 @@ export default function OrdenDetalle() {
                     )}
                   </Fragment>
                 ))}
-                {lineas.length === 0 && (
+                {lineasDanio.length === 0 && (
                   <tr><td colSpan={canEditOrders ? 9 : 8} className="py-12 text-center text-muted-foreground">No hay líneas de daño registradas</td></tr>
                 )}
               </tbody>
@@ -1120,6 +1405,99 @@ export default function OrdenDetalle() {
                 </tfoot>
               )}
             </table>
+          </div>
+
+          <div className="border-t border-border p-4 space-y-4 bg-secondary/5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h4 className="font-heading font-bold uppercase tracking-wide text-sm">Mano de Obra</h4>
+                <p className="text-xs text-muted-foreground">Agregue rubros adicionales de mano de obra para sumarlos al total final del avalúo.</p>
+              </div>
+            </div>
+
+            {canEditOrders && (
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_auto] gap-2 items-end">
+                <div>
+                  <label className="text-xs text-muted-foreground font-semibold uppercase">Concepto</label>
+                  <Input
+                    value={manoObraDraft.concepto}
+                    onChange={(e) => setManoObraDraft((prev) => ({ ...prev, concepto: e.target.value }))}
+                    placeholder="Ej: Alineado de piezas"
+                    className="bg-secondary border-border mt-1"
+                    disabled={addingManoObra}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground font-semibold uppercase">Monto (CRC)</label>
+                  <Input
+                    value={manoObraDraft.monto}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/[^\d]/g, "");
+                      const formatted = digits ? Number(digits).toLocaleString("es-CR") : "";
+                      setManoObraDraft((prev) => ({ ...prev, monto: formatted }));
+                    }}
+                    placeholder="0"
+                    className="bg-secondary border-border mt-1"
+                    inputMode="numeric"
+                    disabled={addingManoObra}
+                  />
+                </div>
+                <Button onClick={agregarManoObra} disabled={addingManoObra} className="gap-2">
+                  {addingManoObra ? "Agregando..." : "Agregar"}
+                </Button>
+              </div>
+            )}
+
+            <div className="rounded-lg border border-border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/30">
+                    <th className="text-left py-3 px-4 text-muted-foreground font-semibold text-xs uppercase">Concepto</th>
+                    <th className="text-right py-3 px-4 text-muted-foreground font-semibold text-xs uppercase">Monto</th>
+                    {canEditOrders && <th className="text-right py-3 px-4 text-muted-foreground font-semibold text-xs uppercase">Acciones</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {manoObraItems.map((item) => (
+                    <tr key={item.id} className="border-b border-border/50">
+                      <td className="py-3 px-4">{getManoObraConcepto(item) || "Mano de obra"}</td>
+                      <td className="py-3 px-4 text-right font-semibold text-primary">
+                        {formatColones(getManoObraMonto(item), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </td>
+                      {canEditOrders && (
+                        <td className="py-3 px-4 text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deleteManoObra(item)}
+                            disabled={deletingManoObraId === item.id}
+                            className="gap-2 text-destructive hover:text-destructive"
+                          >
+                            <Trash2 size={14} /> {deletingManoObraId === item.id ? "Eliminando..." : "Eliminar"}
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                  {manoObraItems.length === 0 && (
+                    <tr>
+                      <td colSpan={canEditOrders ? 3 : 2} className="py-6 px-4 text-center text-muted-foreground">
+                        No hay rubros de mano de obra agregados.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-secondary/30 border-t border-border">
+                    <td className="py-3 px-4 text-right font-bold uppercase text-xs">Total Mano de Obra</td>
+                    <td className="py-3 px-4 text-right font-bold text-primary">
+                      {formatColones(totalManoObra, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </td>
+                    {canEditOrders && <td className="py-3 px-4" />}
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </div>
         </div>
       )}
