@@ -131,6 +131,8 @@ export default function OrdenDetalle() {
   const [pendingKanbanHistorial, setPendingKanbanHistorial] = useState([]);
   const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
   const [uploadingDocumentoIns, setUploadingDocumentoIns] = useState(false);
+  const [uploadingFoto, setUploadingFoto] = useState(false);
+  const [editingFotos, setEditingFotos] = useState(false);
   const [piezasCatalogo, setPiezasCatalogo] = useState([]);
   const [piezaQuery, setPiezaQuery] = useState("");
   const [addingLinea, setAddingLinea] = useState(false);
@@ -213,25 +215,25 @@ export default function OrdenDetalle() {
         rawFotos.map(async (entry, i) => {
           const raw = normalizePhotoEntry(entry);
           if (!raw || raw.startsWith("blob:")) {
-            return { id: `${i}-invalid`, url: null };
+            return { id: `${i}-invalid`, index: i, url: null };
           }
 
           if (raw.startsWith("data:image/")) {
-            return { id: `${i}-data`, url: raw };
+            return { id: `${i}-data`, index: i, url: raw };
           }
 
           const path = extractUploadsPath(raw);
           if (!path) {
-            return { id: `${i}-url`, url: raw };
+            return { id: `${i}-url`, index: i, url: raw };
           }
 
           const signed = await supabase.storage.from("uploads").createSignedUrl(path, 60 * 60 * 24 * 7);
           if (signed.data?.signedUrl) {
-            return { id: `${i}-signed`, url: signed.data.signedUrl };
+            return { id: `${i}-signed`, index: i, url: signed.data.signedUrl };
           }
 
           const pub = supabase.storage.from("uploads").getPublicUrl(path);
-          return { id: `${i}-pub`, url: pub.data?.publicUrl || raw };
+          return { id: `${i}-pub`, index: i, url: pub.data?.publicUrl || raw };
         })
       );
 
@@ -336,6 +338,63 @@ export default function OrdenDetalle() {
     } catch (error) {
       toast({
         title: "No se pudo eliminar el documento",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleFotoUpload = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+
+    setUploadingFoto(true);
+    try {
+      const uploaded = [];
+
+      for (const file of files) {
+        if (!String(file.type || "").startsWith("image/")) {
+          toast({
+            title: "Archivo inválido",
+            description: "Solo se permiten imágenes en la sección de fotos.",
+            variant: "destructive"
+          });
+          continue;
+        }
+
+        const { file_url } = await base44.integrations.Core.UploadFile({ file });
+        uploaded.push(file_url);
+      }
+
+      if (!uploaded.length) return;
+
+      const fotosActuales = Array.isArray(orden?.fotos) ? orden.fotos : [];
+      const fotosNuevas = [...fotosActuales, ...uploaded];
+      await base44.entities.OrdenTrabajo.update(id, { fotos: fotosNuevas });
+      setOrden((prev) => ({ ...prev, fotos: fotosNuevas }));
+      toast({ title: "Fotos cargadas", description: `${uploaded.length} foto(s) agregadas.` });
+    } catch (error) {
+      toast({
+        title: "No se pudo subir la foto",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setUploadingFoto(false);
+    }
+  };
+
+  const removeFoto = async (index) => {
+    try {
+      const fotosActuales = Array.isArray(orden?.fotos) ? orden.fotos : [];
+      const fotosNuevas = fotosActuales.filter((_, i) => i !== index);
+      await base44.entities.OrdenTrabajo.update(id, { fotos: fotosNuevas });
+      setOrden((prev) => ({ ...prev, fotos: fotosNuevas }));
+      toast({ title: "Foto eliminada" });
+    } catch (error) {
+      toast({
+        title: "No se pudo eliminar la foto",
         description: error?.message || "Intente nuevamente.",
         variant: "destructive"
       });
@@ -1685,13 +1744,53 @@ export default function OrdenDetalle() {
 
       {/* Tab: Fotos */}
       {tab === "fotos" && (
-        <div>
+        <div className="space-y-4">
+          {canEditOrders && (
+            <div className="flex justify-end gap-2">
+              {!editingFotos ? (
+                <Button onClick={() => setEditingFotos(true)} className="gap-2">
+                  <Pencil size={14} /> Editar fotos
+                </Button>
+              ) : (
+                <>
+                  <Button variant="outline" onClick={() => setEditingFotos(false)} disabled={uploadingFoto} className="gap-2">
+                    <X size={14} /> Cerrar edición
+                  </Button>
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border bg-secondary px-3 py-2 text-sm hover:border-primary transition-colors">
+                    <Camera size={14} className="text-primary" />
+                    {uploadingFoto ? "Subiendo..." : "Agregar fotos"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={handleFotoUpload}
+                      disabled={uploadingFoto}
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+          )}
+
           {fotosView.filter((f) => !!f.url).length > 0 ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
               {fotosView.filter((f) => !!f.url).map((foto, i) => (
-                <a key={foto.id} href={foto.url} target="_blank" rel="noopener noreferrer">
-                  <img src={foto.url} alt={`Foto ${i+1}`} className="w-full aspect-square object-cover rounded-lg border border-border hover:border-primary transition-colors" />
-                </a>
+                <div key={foto.id} className="space-y-2">
+                  <a href={foto.url} target="_blank" rel="noopener noreferrer">
+                    <img src={foto.url} alt={`Foto ${i+1}`} className="w-full aspect-square object-cover rounded-lg border border-border hover:border-primary transition-colors" />
+                  </a>
+                  {editingFotos && canEditOrders && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full gap-2 text-destructive hover:text-destructive"
+                      onClick={() => removeFoto(foto.index)}
+                    >
+                      <Trash2 size={14} /> Eliminar
+                    </Button>
+                  )}
+                </div>
               ))}
             </div>
           ) : (
