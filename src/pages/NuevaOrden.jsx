@@ -126,12 +126,11 @@ export default function NuevaOrden() {
 
   const handlePlaca = async (raw) => {
     const clean = raw.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 7);
-    const formatted = clean.length > 3 ? clean.slice(0, 3) + "-" + clean.slice(3) : clean;
-    updateForm("placa", formatted);
+    updateForm("placa", clean);
 
     if (clean.length >= 3) {
       setPlacaLoading(true);
-      const resultados = await base44.entities.OrdenTrabajo.filter({ placa: formatted });
+      const resultados = await base44.entities.OrdenTrabajo.filter({ placa: clean });
       setPlacaSugerencias(resultados);
       setPlacaLoading(false);
     } else {
@@ -449,7 +448,7 @@ export default function NuevaOrden() {
           <div className="relative">
             <label className="form-label">Placa *</label>
             <div className="relative">
-              <Input value={form.placa} onChange={e => handlePlaca(e.target.value)} placeholder="ABC-1234" className="bg-secondary border-border uppercase" />
+              <Input value={form.placa} onChange={e => handlePlaca(e.target.value)} placeholder="ABC1234" className="bg-secondary border-border uppercase" />
               {placaLoading && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
                   <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
