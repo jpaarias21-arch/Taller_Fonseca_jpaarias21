@@ -19,6 +19,7 @@ import {
 import { useRole } from "@/lib/useRole";
 import { formatColones, formatDisplayDateTime } from "@/lib/utils";
 import { buildStatusWhatsAppMessage, normalizeWhatsAppPhone } from "@/lib/whatsapp";
+import { jsPDF } from "jspdf";
 
 const ESTADO_COT_COLORS = {
   "Borrador": "bg-secondary text-muted-foreground border-border",
@@ -98,12 +99,18 @@ const getManoObraConcepto = (item) =>
 const getManoObraMonto = (item) =>
   Number(item?.monto ?? item?.total ?? item?.precio ?? 0) || 0;
 
+const getOptionalNumberDraftValue = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return "";
+  return String(num);
+};
+
 const createLineaDraft = (linea) => ({
   cantidad: String(getLineaCantidad(linea)),
-  horas_dm: String(Number(linea?.horas_dm) || 0),
-  horas_reparacion: String(Number(linea?.horas_reparacion) || 0),
-  costo_pintura: String(Number(linea?.costo_pintura) || 0),
-  costo_repuesto: String(Number(linea?.costo_repuesto) || 0),
+  horas_dm: getOptionalNumberDraftValue(linea?.horas_dm),
+  horas_reparacion: getOptionalNumberDraftValue(linea?.horas_reparacion),
+  costo_pintura: getOptionalNumberDraftValue(linea?.costo_pintura),
+  costo_repuesto: getOptionalNumberDraftValue(linea?.costo_repuesto),
   flag_desarmado_montaje: Boolean(linea?.flag_desarmado_montaje),
   flag_reparacion: Boolean(linea?.flag_reparacion),
   flag_pintura: Boolean(linea?.flag_pintura),
@@ -146,6 +153,7 @@ export default function OrdenDetalle() {
   const [editingAvaluo, setEditingAvaluo] = useState(false);
   const [savingAvaluo, setSavingAvaluo] = useState(false);
   const [avaluoDraft, setAvaluoDraft] = useState(null);
+  const [exportingProforma, setExportingProforma] = useState(false);
 
   const createAvaluoDraft = (data) => ({
     placa: String(data?.placa || ""),
@@ -916,6 +924,140 @@ export default function OrdenDetalle() {
   const totalHorasAvaluo = lineas.reduce((sum, l) => sum + getLineaHoras(l), 0);
   const lineasConRepuesto = lineas.filter((l) => l.tipo_repuesto === "Nuevo" || l.tipo_repuesto === "UTS");
 
+  const exportarProformaPDF = () => {
+    if (!orden) return;
+
+    setExportingProforma(true);
+    try {
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 40;
+      let y = margin;
+
+      const ensureSpace = (heightNeeded = 24) => {
+        if (y + heightNeeded <= pageHeight - margin) return;
+        doc.addPage();
+        y = margin;
+      };
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.text("PROFORMA", margin, y);
+      y += 22;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Fecha: ${new Date().toLocaleDateString("es-CR")}`, margin, y);
+      doc.text(`Orden: ${orden.numero_orden || "N/A"}`, pageWidth - margin, y, { align: "right" });
+      y += 18;
+      doc.text(`Cliente: ${orden.cliente_nombre || "N/A"}`, margin, y);
+      y += 14;
+      doc.text(`Vehiculo: ${orden.placa || ""} ${orden.marca || ""} ${orden.modelo || ""} ${orden.anio || ""}`.trim(), margin, y);
+      y += 22;
+
+      ensureSpace(28);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text("Lineas de Avaluo", margin, y);
+      y += 14;
+
+      doc.setDrawColor(100);
+      doc.line(margin, y, pageWidth - margin, y);
+      y += 14;
+
+      const colPieza = margin;
+      const colCant = margin + 250;
+      const colHoras = margin + 300;
+      const colRep = margin + 360;
+      const colSubtotal = pageWidth - margin;
+
+      doc.setFontSize(9);
+      doc.text("Pieza", colPieza, y);
+      doc.text("Cant.", colCant, y);
+      doc.text("Horas", colHoras, y);
+      doc.text("Repuesto", colRep, y);
+      doc.text("Subtotal", colSubtotal, y, { align: "right" });
+      y += 8;
+      doc.line(margin, y, pageWidth - margin, y);
+      y += 12;
+
+      doc.setFont("helvetica", "normal");
+      lineasDanio.forEach((linea) => {
+        const pieza = String(linea.pieza_nombre || "Pieza");
+        const piezasTexto = doc.splitTextToSize(pieza, 220);
+        const rowHeight = Math.max(16, piezasTexto.length * 11 + 2);
+        ensureSpace(rowHeight + 6);
+
+        doc.text(piezasTexto, colPieza, y);
+        doc.text(String(getLineaCantidad(linea)), colCant, y);
+        doc.text(String(getLineaHoras(linea)), colHoras, y);
+        doc.text(String(linea.tipo_repuesto || "Ninguno"), colRep, y);
+        doc.text(
+          formatColones(getLineaMontoCotizado(linea), { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+          colSubtotal,
+          y,
+          { align: "right" }
+        );
+
+        y += rowHeight;
+        doc.setDrawColor(60);
+        doc.line(margin, y - 4, pageWidth - margin, y - 4);
+        y += 6;
+      });
+
+      if (manoObraItems.length > 0) {
+        ensureSpace(30);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text("Mano de Obra", margin, y);
+        y += 14;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+
+        manoObraItems.forEach((item) => {
+          ensureSpace(18);
+          const concepto = getManoObraConcepto(item) || "Mano de obra";
+          doc.text(concepto, margin, y);
+          doc.text(
+            formatColones(getManoObraMonto(item), { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+            colSubtotal,
+            y,
+            { align: "right" }
+          );
+          y += 16;
+        });
+      }
+
+      ensureSpace(44);
+      y += 8;
+      doc.setDrawColor(100);
+      doc.line(margin, y, pageWidth - margin, y);
+      y += 18;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("TOTAL PROFORMA", margin, y);
+      doc.text(
+        formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+        colSubtotal,
+        y,
+        { align: "right" }
+      );
+
+      const safeOrder = String(orden.numero_orden || orden.placa || "orden").replace(/[^a-zA-Z0-9-_]/g, "_");
+      doc.save(`Proforma-${safeOrder}.pdf`);
+      toast({ title: "Proforma exportada", description: "Se descargo el PDF correctamente." });
+    } catch (error) {
+      toast({
+        title: "No se pudo exportar la proforma",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setExportingProforma(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -1235,41 +1377,49 @@ export default function OrdenDetalle() {
       {/* Tab: Avalúo */}
       {tab === "avaluo" && (
         <div className="data-card p-0 overflow-hidden">
-          {canEditOrders && (
-            <div className="border-b border-border p-4 bg-secondary/10">
-              <label className="text-xs text-muted-foreground font-semibold uppercase">Agregar producto al avalúo</label>
-              <div className="relative mt-2 max-w-2xl">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={piezaQuery}
-                  onChange={e => setPiezaQuery(e.target.value)}
-                  placeholder="Buscar pieza del catálogo por nombre, código o categoría..."
-                  className="pl-9 bg-secondary border-border"
-                  disabled={addingLinea}
-                />
-                {piezaQuery.trim() && (
-                  <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-xl">
-                    {piezasFiltradas.length > 0 ? (
-                      piezasFiltradas.map((pieza) => (
-                        <button
-                          key={pieza.id}
-                          type="button"
-                          onClick={() => agregarPiezaAvaluo(pieza)}
-                          className="w-full border-b border-border/60 px-4 py-2.5 text-left hover:bg-secondary last:border-b-0"
-                          disabled={addingLinea}
-                        >
-                          <p className="text-sm font-medium text-foreground">{pieza.nombre}</p>
-                          <p className="text-xs text-muted-foreground">{pieza.categoria}{pieza.codigo ? ` · ${pieza.codigo}` : ""}</p>
-                        </button>
-                      ))
-                    ) : (
-                      <p className="px-4 py-3 text-sm text-muted-foreground">No se encontraron piezas con ese criterio.</p>
-                    )}
-                  </div>
-                )}
-              </div>
+          <div className="border-b border-border p-4 bg-secondary/10 space-y-4">
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={exportarProformaPDF} disabled={exportingProforma} className="gap-2">
+                <FileText size={14} /> {exportingProforma ? "Generando..." : "Proforma"}
+              </Button>
             </div>
-          )}
+
+            {canEditOrders && (
+              <div>
+                <label className="text-xs text-muted-foreground font-semibold uppercase">Agregar producto al avalúo</label>
+                <div className="relative mt-2 max-w-2xl">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={piezaQuery}
+                    onChange={e => setPiezaQuery(e.target.value)}
+                    placeholder="Buscar pieza del catálogo por nombre, código o categoría..."
+                    className="pl-9 bg-secondary border-border"
+                    disabled={addingLinea}
+                  />
+                  {piezaQuery.trim() && (
+                    <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-xl">
+                      {piezasFiltradas.length > 0 ? (
+                        piezasFiltradas.map((pieza) => (
+                          <button
+                            key={pieza.id}
+                            type="button"
+                            onClick={() => agregarPiezaAvaluo(pieza)}
+                            className="w-full border-b border-border/60 px-4 py-2.5 text-left hover:bg-secondary last:border-b-0"
+                            disabled={addingLinea}
+                          >
+                            <p className="text-sm font-medium text-foreground">{pieza.nombre}</p>
+                            <p className="text-xs text-muted-foreground">{pieza.categoria}{pieza.codigo ? ` · ${pieza.codigo}` : ""}</p>
+                          </button>
+                        ))
+                      ) : (
+                        <p className="px-4 py-3 text-sm text-muted-foreground">No se encontraron piezas con ese criterio.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>

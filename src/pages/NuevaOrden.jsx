@@ -44,6 +44,13 @@ const getLineaHoras = (linea) =>
 const getLineaMontoCotizado = (linea) =>
   (Number(linea?.costo_pintura) || 0) + ((Number(linea?.costo_repuesto) || 0) * getLineaCantidad(linea));
 
+const parseOptionalNumberInput = (raw) => {
+  if (raw === "") return "";
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+};
+
 function PiezaSelector({ piezas, onSelect }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -225,7 +232,7 @@ export default function NuevaOrden() {
       flag_pintura: false,
       tipo_repuesto: "Ninguno",
       descripcion_dano: "",
-      horas_dm: 0, horas_reparacion: 0, costo_mano_obra: 0, costo_pintura: 0, costo_repuesto: 0,
+      horas_dm: "", horas_reparacion: "", costo_mano_obra: 0, costo_pintura: 0, costo_repuesto: 0,
     }]);
     setLineasDisplay(prev => [...prev, { costo_repuesto: "", costo_pintura: "", cantidad: "1" }]);
   };
@@ -763,13 +770,25 @@ export default function NuevaOrden() {
                 {linea.flag_desarmado_montaje && (
                   <div>
                     <label className="form-label">Hrs D&M</label>
-                    <Input type="number" min={0} value={linea.horas_dm} onChange={e => updateLinea(idx, "horas_dm", Number(e.target.value))} className="bg-card border-border h-8 text-sm" />
+                    <Input
+                      type="number"
+                      min={0}
+                      value={linea.horas_dm}
+                      onChange={e => updateLinea(idx, "horas_dm", parseOptionalNumberInput(e.target.value))}
+                      className="bg-card border-border h-8 text-sm"
+                    />
                   </div>
                 )}
                 {linea.flag_reparacion && (
                   <div>
                     <label className="form-label">Hrs Rep.</label>
-                    <Input type="number" min={0} value={linea.horas_reparacion} onChange={e => updateLinea(idx, "horas_reparacion", Number(e.target.value))} className="bg-card border-border h-8 text-sm" />
+                    <Input
+                      type="number"
+                      min={0}
+                      value={linea.horas_reparacion}
+                      onChange={e => updateLinea(idx, "horas_reparacion", parseOptionalNumberInput(e.target.value))}
+                      className="bg-card border-border h-8 text-sm"
+                    />
                   </div>
                 )}
                 {linea.flag_pintura && (

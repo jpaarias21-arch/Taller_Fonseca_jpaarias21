@@ -11,6 +11,16 @@ export default defineConfig({
   plugins: [
     react(),
   ],
+  server: {
+    host: '0.0.0.0',
+    port: 5175,
+    strictPort: true,
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: 5175,
+    strictPort: true,
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
