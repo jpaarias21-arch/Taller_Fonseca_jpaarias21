@@ -128,7 +128,10 @@ export default function OrdenDetalle() {
   const [manoObraItems, setManoObraItems] = useState([]);
   const [compras, setCompras] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("info");
+  // Read initial tab from URL query param (?tab=avaluo etc.)
+  const urlParams = new URLSearchParams(window.location.search);
+  const initialTab = urlParams.get("tab") || "info";
+  const [tab, setTab] = useState(initialTab);
   const [updatingEstado, setUpdatingEstado] = useState(false);
   const [fotosView, setFotosView] = useState([]);
   const [documentosInsView, setDocumentosInsView] = useState([]);
@@ -206,6 +209,17 @@ export default function OrdenDetalle() {
     };
     load();
   }, [id]);
+
+  // Listen for exportar-proforma event triggered from Ordenes list
+  useEffect(() => {
+    const handler = () => {
+      if (tab === "avaluo" && !loading) {
+        exportarProformaPDF();
+      }
+    };
+    window.addEventListener("exportar-proforma", handler);
+    return () => window.removeEventListener("exportar-proforma", handler);
+  }, [tab, loading]);
 
   useEffect(() => {
     if (!orden) return;
