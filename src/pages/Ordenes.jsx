@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import {
   Plus, Search, Car, Filter, ArrowRight, Trash2,
-  Printer, CheckSquare, XSquare, Check, Loader2
+  Printer, CheckSquare, XSquare, Check, Loader2, DollarSign
 } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { formatDisplayDateTime } from "@/lib/utils";
@@ -13,6 +13,17 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
+
+// Función para formatear el monto de la cotización
+const formatCurrency = (amount, currency = "CRC") => {
+  if (amount === undefined || amount === null || isNaN(amount)) return "₡0";
+  return new Intl.NumberFormat("es-CR", {
+    style: "currency",
+    currency: currency,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount);
+};
 
 // Color de barra lateral por estado cotización
 const BARRA_COLOR = {
@@ -302,6 +313,10 @@ export default function Ordenes() {
               const barraColor = BARRA_COLOR[orden.estado_cotizacion] || "bg-muted-foreground";
               const badgeStyle = BADGE_STYLE[orden.estado_cotizacion] || "bg-secondary text-muted-foreground border-border";
               const kanbanColor = KANBAN_COLOR[orden.estado_kanban] || "text-muted-foreground";
+              
+              // Obtención del monto total de la cotización/avalúo
+              const montoCotizacion = orden.monto_cotizado ?? orden.total_cotizacion ?? orden.monto_total ?? orden.monto ?? 0;
+              const moneda = orden.moneda || "CRC";
 
               return (
                 <div
@@ -354,15 +369,21 @@ export default function Ordenes() {
                       </div>
                     </div>
 
-                    {/* Datos clave */}
-                    <div className="grid grid-cols-2 gap-3 py-3 border-y border-white/5 mb-4">
+                    {/* Datos clave + Cotización */}
+                    <div className="grid grid-cols-3 gap-2 py-3 border-y border-white/5 mb-4">
                       <div>
                         <p className="text-[10px] uppercase text-muted-foreground font-bold tracking-wider mb-0.5">Placa</p>
                         <p className="font-bold text-primary text-sm">{orden.placa}</p>
                       </div>
                       <div>
                         <p className="text-[10px] uppercase text-muted-foreground font-bold tracking-wider mb-0.5">Ingreso</p>
-                        <p className="text-sm font-medium">{formatDisplayDateTime(orden.fecha_ingreso)}</p>
+                        <p className="text-xs sm:text-sm font-medium">{formatDisplayDateTime(orden.fecha_ingreso)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase text-muted-foreground font-bold tracking-wider mb-0.5">Cotización</p>
+                        <p className="font-bold text-emerald-400 text-sm">
+                          {formatCurrency(montoCotizacion, moneda)}
+                        </p>
                       </div>
                     </div>
 

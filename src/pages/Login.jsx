@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
@@ -15,14 +16,14 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  const handleSubmit = async (/** @type {React.FormEvent} */ e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
       await base44.auth.loginViaEmailPassword(email, password);
       window.location.href = "/";
-    } catch (/** @type {any} */ err) {
+    } catch (err) {
       setError(err.message || "Invalid email or password");
     } finally {
       setLoading(false);
@@ -68,7 +69,7 @@ export default function Login() {
                   autoFocus
                   placeholder="usuario@ejemplo.com"
                   value={email}
-                  onChange={(/** @type {React.ChangeEvent} */ e) => setEmail(e.target.value)}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="pl-10 h-12 bg-background border-border"
                   required
                 />
@@ -90,7 +91,7 @@ export default function Login() {
                   autoComplete="current-password"
                   placeholder="••••••••"
                   value={password}
-                  onChange={(/** @type {React.ChangeEvent} */ e) => setPassword(e.target.value)}
+                  onChange={(e) => setPassword(e.target.value)}
                   className="pl-10 pr-10 h-12 bg-background border-border"
                   required
                 />

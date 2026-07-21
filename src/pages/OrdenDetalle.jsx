@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { generarReporteVehiculo } from "../utils/generarReporteVehiculo";
 import { Fragment, useMemo, useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
@@ -55,9 +56,7 @@ const normalizePhotoEntry = (value) => {
 const extractUploadsPath = (value) => {
   const raw = String(value || "").trim();
   if (!raw) return null;
-
   if (raw.startsWith("uploads/")) return raw.slice("uploads/".length);
-
   try {
     const parsed = new URL(raw);
     const marker = "/uploads/";
@@ -66,7 +65,6 @@ const extractUploadsPath = (value) => {
   } catch {
     return null;
   }
-
   return null;
 };
 
@@ -74,7 +72,6 @@ const getStoredFileName = (value, fallback = "Documento") => {
   const raw = String(value || "").trim();
   if (!raw) return fallback;
   if (raw.startsWith("data:")) return fallback;
-
   try {
     const parsed = new URL(raw);
     const fileName = parsed.pathname.split("/").pop();
@@ -86,7 +83,6 @@ const getStoredFileName = (value, fallback = "Documento") => {
 };
 
 const getLineaCantidad = (linea) => Math.max(1, Number(linea?.cantidad) || 1);
-
 const getLineaHoras = (linea) =>
   (Number(linea?.horas_dm) || 0) + (Number(linea?.horas_reparacion) || 0);
 
@@ -123,40 +119,51 @@ export default function OrdenDetalle() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { canApproveQuote, canMoveKanban, canEditOrders } = useRole();
+
   const [orden, setOrden] = useState(null);
   const [lineas, setLineas] = useState([]);
   const [manoObraItems, setManoObraItems] = useState([]);
   const [compras, setCompras] = useState([]);
   const [loading, setLoading] = useState(true);
+
   // Read initial tab from URL query param (?tab=avaluo etc.)
   const urlParams = new URLSearchParams(window.location.search);
   const initialTab = urlParams.get("tab") || "info";
   const [tab, setTab] = useState(initialTab);
+
   const [updatingEstado, setUpdatingEstado] = useState(false);
   const [fotosView, setFotosView] = useState([]);
   const [documentosInsView, setDocumentosInsView] = useState([]);
+
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [pendingWhatsappStatus, setPendingWhatsappStatus] = useState("");
   const [pendingWhatsappMessage, setPendingWhatsappMessage] = useState("");
   const [pendingKanbanHistorial, setPendingKanbanHistorial] = useState([]);
   const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
+
   const [uploadingDocumentoIns, setUploadingDocumentoIns] = useState(false);
   const [uploadingFoto, setUploadingFoto] = useState(false);
   const [editingFotos, setEditingFotos] = useState(false);
+
   const [piezasCatalogo, setPiezasCatalogo] = useState([]);
   const [piezaQuery, setPiezaQuery] = useState("");
   const [addingLinea, setAddingLinea] = useState(false);
+
   const [editingLineaId, setEditingLineaId] = useState(null);
   const [lineaDraft, setLineaDraft] = useState(null);
   const [savingLineaId, setSavingLineaId] = useState(null);
   const [deletingLineaId, setDeletingLineaId] = useState(null);
+
   const [manoObraDraft, setManoObraDraft] = useState({ concepto: "", monto: "" });
   const [addingManoObra, setAddingManoObra] = useState(false);
   const [deletingManoObraId, setDeletingManoObraId] = useState(null);
+
   const [editingAvaluo, setEditingAvaluo] = useState(false);
   const [savingAvaluo, setSavingAvaluo] = useState(false);
   const [avaluoDraft, setAvaluoDraft] = useState(null);
+
   const [exportingProforma, setExportingProforma] = useState(false);
+  const [exportingCotizacion, setExportingCotizacion] = useState(false);
 
   const createAvaluoDraft = (data) => ({
     placa: String(data?.placa || ""),
@@ -210,6 +217,16 @@ export default function OrdenDetalle() {
     load();
   }, [id]);
 
+  // Auto-sincronizar monto_cotizado al cargar la página
+  useEffect(() => {
+    if (loading || !orden || !lineas) return;
+    const totalCalculado = calcularTotalCotizado(lineas, manoObraItems);
+    if (orden.monto_cotizado !== totalCalculado) {
+      base44.entities.OrdenTrabajo.update(id, { monto_cotizado: totalCalculado }).catch(() => {});
+      setOrden((prev) => ({ ...prev, monto_cotizado: totalCalculado }));
+    }
+  }, [loading, orden?.id, lineas?.length, manoObraItems?.length]);
+
   // Listen for exportar-proforma event triggered from Ordenes list
   useEffect(() => {
     const handler = () => {
@@ -230,7 +247,6 @@ export default function OrdenDetalle() {
 
   useEffect(() => {
     let cancelled = false;
-
     const resolveFotos = async () => {
       const rawFotos = Array.isArray(orden?.fotos) ? orden.fotos : [];
       const resolved = await Promise.all(
@@ -239,29 +255,23 @@ export default function OrdenDetalle() {
           if (!raw || raw.startsWith("blob:")) {
             return { id: `${i}-invalid`, index: i, url: null };
           }
-
           if (raw.startsWith("data:image/")) {
             return { id: `${i}-data`, index: i, url: raw };
           }
-
           const path = extractUploadsPath(raw);
           if (!path) {
             return { id: `${i}-url`, index: i, url: raw };
           }
-
           const signed = await supabase.storage.from("uploads").createSignedUrl(path, 60 * 60 * 24 * 7);
           if (signed.data?.signedUrl) {
             return { id: `${i}-signed`, index: i, url: signed.data.signedUrl };
           }
-
           const pub = supabase.storage.from("uploads").getPublicUrl(path);
           return { id: `${i}-pub`, index: i, url: pub.data?.publicUrl || raw };
         })
       );
-
       if (!cancelled) setFotosView(resolved);
     };
-
     resolveFotos();
     return () => {
       cancelled = true;
@@ -270,7 +280,6 @@ export default function OrdenDetalle() {
 
   useEffect(() => {
     let cancelled = false;
-
     const resolveDocumentosIns = async () => {
       const rawDocs = Array.isArray(orden?.documentos_ins) ? orden.documentos_ins : [];
       const resolved = await Promise.all(
@@ -279,30 +288,24 @@ export default function OrdenDetalle() {
           if (!raw || raw.startsWith("blob:")) {
             return { id: `${i}-invalid`, url: null, name: `Documento INS ${i + 1}` };
           }
-
           if (raw.startsWith("data:application/pdf")) {
             return { id: `${i}-data`, url: raw, name: `Documento INS ${i + 1}` };
           }
-
           const path = extractUploadsPath(raw);
           const fallbackName = getStoredFileName(raw, `Documento INS ${i + 1}`);
           if (!path) {
             return { id: `${i}-url`, url: raw, name: fallbackName };
           }
-
           const signed = await supabase.storage.from("uploads").createSignedUrl(path, 60 * 60 * 24 * 7);
           if (signed.data?.signedUrl) {
             return { id: `${i}-signed`, url: signed.data.signedUrl, name: fallbackName };
           }
-
           const pub = supabase.storage.from("uploads").getPublicUrl(path);
           return { id: `${i}-pub`, url: pub.data?.publicUrl || raw, name: fallbackName };
         })
       );
-
       if (!cancelled) setDocumentosInsView(resolved);
     };
-
     resolveDocumentosIns();
     return () => {
       cancelled = true;
@@ -317,7 +320,6 @@ export default function OrdenDetalle() {
     setUploadingDocumentoIns(true);
     try {
       const uploaded = [];
-
       for (const file of files) {
         if (file.type !== "application/pdf") {
           toast({
@@ -327,7 +329,6 @@ export default function OrdenDetalle() {
           });
           continue;
         }
-
         const { file_url } = await base44.integrations.Core.UploadFile({ file });
         uploaded.push(file_url);
       }
@@ -336,6 +337,7 @@ export default function OrdenDetalle() {
 
       const documentosActuales = Array.isArray(orden?.documentos_ins) ? orden.documentos_ins : [];
       const documentosNuevos = [...documentosActuales, ...uploaded];
+
       await base44.entities.OrdenTrabajo.update(id, { documentos_ins: documentosNuevos });
       setOrden((prev) => ({ ...prev, documentos_ins: documentosNuevos }));
       toast({ title: "Documentación INS cargada", description: `${uploaded.length} PDF(s) agregados.` });
@@ -354,6 +356,7 @@ export default function OrdenDetalle() {
     try {
       const documentosActuales = Array.isArray(orden?.documentos_ins) ? orden.documentos_ins : [];
       const documentosNuevos = documentosActuales.filter((_, i) => i !== index);
+
       await base44.entities.OrdenTrabajo.update(id, { documentos_ins: documentosNuevos });
       setOrden((prev) => ({ ...prev, documentos_ins: documentosNuevos }));
       toast({ title: "Documento eliminado" });
@@ -374,7 +377,6 @@ export default function OrdenDetalle() {
     setUploadingFoto(true);
     try {
       const uploaded = [];
-
       for (const file of files) {
         if (!String(file.type || "").startsWith("image/")) {
           toast({
@@ -384,7 +386,6 @@ export default function OrdenDetalle() {
           });
           continue;
         }
-
         const { file_url } = await base44.integrations.Core.UploadFile({ file });
         uploaded.push(file_url);
       }
@@ -393,6 +394,7 @@ export default function OrdenDetalle() {
 
       const fotosActuales = Array.isArray(orden?.fotos) ? orden.fotos : [];
       const fotosNuevas = [...fotosActuales, ...uploaded];
+
       await base44.entities.OrdenTrabajo.update(id, { fotos: fotosNuevas });
       setOrden((prev) => ({ ...prev, fotos: fotosNuevas }));
       toast({ title: "Fotos cargadas", description: `${uploaded.length} foto(s) agregadas.` });
@@ -411,6 +413,7 @@ export default function OrdenDetalle() {
     try {
       const fotosActuales = Array.isArray(orden?.fotos) ? orden.fotos : [];
       const fotosNuevas = fotosActuales.filter((_, i) => i !== index);
+
       await base44.entities.OrdenTrabajo.update(id, { fotos: fotosNuevas });
       setOrden((prev) => ({ ...prev, fotos: fotosNuevas }));
       toast({ title: "Foto eliminada" });
@@ -426,14 +429,11 @@ export default function OrdenDetalle() {
   const handleEstadoCotizacion = async (nuevoEstado) => {
     setUpdatingEstado(true);
     const aprobado = nuevoEstado === "Aprobado" || nuevoEstado === "Autorizado por Seguro";
-
     await base44.entities.OrdenTrabajo.update(id, { estado_cotizacion: nuevoEstado });
 
-    // Auto-generate purchase requirements when approved
     if (aprobado) {
       const lineasParaCompra = lineas.filter(l => l.tipo_repuesto === "Nuevo" || l.tipo_repuesto === "UTS");
       for (const linea of lineasParaCompra) {
-        // Check if already exists
         const existe = compras.find(c => c.linea_avaluo_id === linea.id);
         if (!existe) {
           await base44.entities.RequerimientoCompra.create({
@@ -454,7 +454,6 @@ export default function OrdenDetalle() {
     setOrden(prev => ({ ...prev, estado_cotizacion: nuevoEstado }));
     setUpdatingEstado(false);
 
-    // Reload compras
     const reqs = await base44.entities.RequerimientoCompra.filter({ orden_id: id });
     setCompras(reqs);
   };
@@ -515,8 +514,8 @@ export default function OrdenDetalle() {
 
     try {
       setSendingWhatsapp(true);
-
       let updatedOrder = null;
+
       try {
         updatedOrder = await OrdenTrabajoAPI.actualizarEstatusKanbanConHistorial(id, pendingWhatsappStatus, pendingKanbanHistorial);
       } catch {
@@ -612,8 +611,8 @@ export default function OrdenDetalle() {
     }
 
     payload.subtotal = getLineaMontoCotizado(payload);
-
     setSavingLineaId(linea.id);
+
     try {
       await base44.entities.LineaAvaluo.update(linea.id, payload);
 
@@ -663,10 +662,11 @@ export default function OrdenDetalle() {
       setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
       setEditingLineaId(null);
       setLineaDraft(null);
-      toast({ title: "Avalúo actualizado", description: "La línea de avalúo fue actualizada." });
+
+      toast({ title: "Avaluó actualizado", description: "La línea de avaluó fue actualizada." });
     } catch (error) {
       toast({
-        title: "No se pudo actualizar el avalúo",
+        title: "No se pudo actualizar el avaluó",
         description: error?.message || "Intente nuevamente.",
         variant: "destructive"
       });
@@ -678,7 +678,7 @@ export default function OrdenDetalle() {
   const deleteLinea = async (linea) => {
     if (!linea?.id) return;
 
-    const confirmed = window.confirm(`¿Eliminar la línea \"${linea.pieza_nombre}\" del avalúo?`);
+    const confirmed = window.confirm(`¿Eliminar la línea "${linea.pieza_nombre}" del avaluó?`);
     if (!confirmed) return;
 
     setDeletingLineaId(linea.id);
@@ -704,7 +704,7 @@ export default function OrdenDetalle() {
 
       toast({
         title: "Línea eliminada",
-        description: "La línea fue removida del avalúo correctamente."
+        description: "La línea fue removida del avaluó correctamente."
       });
     } catch (error) {
       toast({
@@ -720,7 +720,6 @@ export default function OrdenDetalle() {
   const piezasFiltradas = useMemo(() => {
     const q = normalizeText(piezaQuery);
     if (!q) return [];
-
     return piezasCatalogo
       .filter((pieza) => {
         const nombre = normalizeText(pieza?.nombre);
@@ -738,7 +737,7 @@ export default function OrdenDetalle() {
     if (yaExiste) {
       toast({
         title: "Pieza ya agregada",
-        description: "Esa pieza ya existe en el avalúo. Edítela desde la tabla.",
+        description: "Esa pieza ya existe en el avaluó. Edítela desde la tabla.",
       });
       return;
     }
@@ -773,7 +772,8 @@ export default function OrdenDetalle() {
       setLineas(updatedLineas);
       setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
       setPiezaQuery("");
-      toast({ title: "Pieza agregada", description: "La línea se agregó al avalúo." });
+
+      toast({ title: "Pieza agregada", description: "La línea se agregó al avaluó." });
     } catch (error) {
       toast({
         title: "No se pudo agregar la pieza",
@@ -831,7 +831,8 @@ export default function OrdenDetalle() {
       setManoObraItems(updatedManoObra);
       setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
       setManoObraDraft({ concepto: "", monto: "" });
-      toast({ title: "Mano de obra agregada", description: "El rubro fue agregado al avalúo." });
+
+      toast({ title: "Mano de obra agregada", description: "El rubro fue agregado al avaluó." });
     } catch (error) {
       toast({
         title: "No se pudo agregar mano de obra",
@@ -846,7 +847,7 @@ export default function OrdenDetalle() {
   const deleteManoObra = async (item) => {
     if (!item?.id) return;
 
-    const confirmed = window.confirm(`¿Eliminar el rubro de mano de obra \"${getManoObraConcepto(item) || "sin concepto"}\"?`);
+    const confirmed = window.confirm(`¿Eliminar el rubro de mano de obra "${getManoObraConcepto(item) || "sin concepto"}"?`);
     if (!confirmed) return;
 
     setDeletingManoObraId(item.id);
@@ -861,6 +862,7 @@ export default function OrdenDetalle() {
 
       setManoObraItems(updatedManoObra);
       setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
+
       toast({ title: "Mano de obra eliminada", description: "El rubro fue eliminado." });
     } catch (error) {
       toast({
@@ -917,8 +919,8 @@ export default function OrdenDetalle() {
       setOrden((prev) => ({ ...prev, ...payload }));
       setEditingAvaluo(false);
       toast({
-        title: "Avalúo actualizado",
-        description: "Se guardaron los cambios generales del avalúo."
+        title: "Avaluó actualizado",
+        description: "Se guardaron los cambios generales del avaluó."
       });
     } catch (error) {
       toast({
@@ -933,14 +935,12 @@ export default function OrdenDetalle() {
 
   const lineasDanio = lineas;
   const totalManoObra = manoObraItems.reduce((sum, item) => sum + getManoObraMonto(item), 0);
-
   const totalCotizado = calcularTotalCotizado(lineas, manoObraItems);
   const totalHorasAvaluo = lineas.reduce((sum, l) => sum + getLineaHoras(l), 0);
   const lineasConRepuesto = lineas.filter((l) => l.tipo_repuesto === "Nuevo" || l.tipo_repuesto === "UTS");
 
   const exportarProformaPDF = () => {
     if (!orden) return;
-
     setExportingProforma(true);
     try {
       const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -965,17 +965,17 @@ export default function OrdenDetalle() {
       doc.text(`Fecha: ${new Date().toLocaleDateString("es-CR")}`, margin, y);
       doc.text(`Orden: ${orden.numero_orden || "N/A"}`, pageWidth - margin, y, { align: "right" });
       y += 18;
+
       doc.text(`Cliente: ${orden.cliente_nombre || "N/A"}`, margin, y);
       y += 14;
-      doc.text(`Vehiculo: ${orden.placa || ""} ${orden.marca || ""} ${orden.modelo || ""} ${orden.anio || ""}`.trim(), margin, y);
+      doc.text(`Vehículo: ${orden.placa || ""} ${orden.marca || ""} ${orden.modelo || ""} ${orden.anio || ""}`.trim(), margin, y);
       y += 22;
 
       ensureSpace(28);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(11);
-      doc.text("Lineas de Avaluo", margin, y);
+      doc.text("Líneas de Avaluó", margin, y);
       y += 14;
-
       doc.setDrawColor(100);
       doc.line(margin, y, pageWidth - margin, y);
       y += 14;
@@ -1001,8 +1001,8 @@ export default function OrdenDetalle() {
         const pieza = String(linea.pieza_nombre || "Pieza");
         const piezasTexto = doc.splitTextToSize(pieza, 220);
         const rowHeight = Math.max(16, piezasTexto.length * 11 + 2);
-        ensureSpace(rowHeight + 6);
 
+        ensureSpace(rowHeight + 6);
         doc.text(piezasTexto, colPieza, y);
         doc.text(String(getLineaCantidad(linea)), colCant, y);
         doc.text(String(getLineaHoras(linea)), colHoras, y);
@@ -1013,7 +1013,6 @@ export default function OrdenDetalle() {
           y,
           { align: "right" }
         );
-
         y += rowHeight;
         doc.setDrawColor(60);
         doc.line(margin, y - 4, pageWidth - margin, y - 4);
@@ -1026,9 +1025,9 @@ export default function OrdenDetalle() {
         doc.setFontSize(11);
         doc.text("Mano de Obra", margin, y);
         y += 14;
+
         doc.setFont("helvetica", "normal");
         doc.setFontSize(9);
-
         manoObraItems.forEach((item) => {
           ensureSpace(18);
           const concepto = getManoObraConcepto(item) || "Mano de obra";
@@ -1048,6 +1047,7 @@ export default function OrdenDetalle() {
       doc.setDrawColor(100);
       doc.line(margin, y, pageWidth - margin, y);
       y += 18;
+
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
       doc.text("TOTAL PROFORMA", margin, y);
@@ -1060,7 +1060,8 @@ export default function OrdenDetalle() {
 
       const safeOrder = String(orden.numero_orden || orden.placa || "orden").replace(/[^a-zA-Z0-9-_]/g, "_");
       doc.save(`Proforma-${safeOrder}.pdf`);
-      toast({ title: "Proforma exportada", description: "Se descargo el PDF correctamente." });
+
+      toast({ title: "Proforma exportada", description: "Se descargó el PDF correctamente." });
     } catch (error) {
       toast({
         title: "No se pudo exportar la proforma",
@@ -1091,7 +1092,7 @@ export default function OrdenDetalle() {
 
   const TABS = [
     { id: "info", label: "Información", IconComp: Car },
-    { id: "avaluo", label: "Avalúo", IconComp: Wrench },
+    { id: "avaluo", label: "Avaluó", IconComp: Wrench },
     { id: "comparativa-ins", label: `Comparativa/INS (${orden.documentos_ins?.length || 0})`, IconComp: FileText },
     { id: "compras", label: `Compras (${compras.length})`, IconComp: Package },
     { id: "fotos", label: `Fotos (${orden.fotos?.length || 0})`, IconComp: Camera },
@@ -1114,7 +1115,7 @@ export default function OrdenDetalle() {
               {orden.estado_cotizacion}
             </span>
           </div>
-          <p className="text-muted-foreground text-sm">{orden.numero_orden} · {orden.marca} {orden.modelo} {orden.anio} · {orden.cliente_nombre}</p>
+          <p className="text-muted-foreground text-sm">{orden.numero_orden} • {orden.marca} {orden.modelo} {orden.anio} • {orden.cliente_nombre}</p>
         </div>
       </div>
 
@@ -1143,6 +1144,7 @@ export default function OrdenDetalle() {
                 </div>
               )}
             </div>
+
             <div>
               <p className="text-xs text-muted-foreground mb-1 font-semibold uppercase flex items-center gap-1">
                 Estación Kanban {!canMoveKanban && <Lock size={11} className="text-muted-foreground" />}
@@ -1161,15 +1163,18 @@ export default function OrdenDetalle() {
               )}
             </div>
           </div>
+
           <div className="text-right">
             <p className="text-xs text-muted-foreground font-semibold uppercase">Total Horas</p>
             <p className="text-2xl font-heading font-bold text-foreground">{totalHorasAvaluo}</p>
           </div>
+
           <div className="text-right">
             <p className="text-xs text-muted-foreground font-semibold uppercase">Total Cotizado</p>
             <p className="text-2xl font-heading font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
           </div>
         </div>
+
         {(orden.estado_cotizacion === "Borrador" || orden.estado_cotizacion === "Enviado") && (
           <div className="mt-3 flex items-center gap-2 text-yellow-400 text-xs bg-yellow-500/10 border border-yellow-500/20 rounded-md px-3 py-2">
             <AlertTriangle size={14} />
@@ -1220,7 +1225,7 @@ export default function OrdenDetalle() {
             <div className="flex justify-end gap-2">
               {!editingAvaluo ? (
                 <Button onClick={startEditAvaluo} className="gap-2">
-                  <Pencil size={14} /> Editar avalúo
+                  <Pencil size={14} /> Editar avaluó
                 </Button>
               ) : (
                 <>
@@ -1237,30 +1242,25 @@ export default function OrdenDetalle() {
 
           {editingAvaluo && avaluoDraft && (
             <div className="data-card space-y-4">
-              <h3 className="font-heading font-bold uppercase tracking-wide">Edición General del Avalúo</h3>
-
+              <h3 className="font-heading font-bold uppercase tracking-wide">Edición General del Avaluó</h3>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <Input value={avaluoDraft.placa} onChange={(e) => updateAvaluoDraft("placa", e.target.value)} placeholder="Placa" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.marca} onChange={(e) => updateAvaluoDraft("marca", e.target.value)} placeholder="Marca" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.modelo} onChange={(e) => updateAvaluoDraft("modelo", e.target.value)} placeholder="Modelo" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.anio} onChange={(e) => updateAvaluoDraft("anio", e.target.value.replace(/[^\d]/g, ""))} placeholder="Año" className="bg-secondary border-border" />
-
                 <Input value={avaluoDraft.color} onChange={(e) => updateAvaluoDraft("color", e.target.value)} placeholder="Color" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.codigo_pintura} onChange={(e) => updateAvaluoDraft("codigo_pintura", e.target.value)} placeholder="Código pintura" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.kilometraje} onChange={(e) => updateAvaluoDraft("kilometraje", e.target.value.replace(/[^\d]/g, ""))} placeholder="Kilometraje" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.numero_predio} onChange={(e) => updateAvaluoDraft("numero_predio", e.target.value)} placeholder="N° predio" className="bg-secondary border-border" />
-
                 <Input value={avaluoDraft.cliente_nombre} onChange={(e) => updateAvaluoDraft("cliente_nombre", e.target.value)} placeholder="Nombre cliente" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.cliente_telefono} onChange={(e) => updateAvaluoDraft("cliente_telefono", e.target.value)} placeholder="Teléfono" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.cliente_cedula} onChange={(e) => updateAvaluoDraft("cliente_cedula", e.target.value)} placeholder="Cédula" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.lugar_procedencia} onChange={(e) => updateAvaluoDraft("lugar_procedencia", e.target.value)} placeholder="Procedencia" className="bg-secondary border-border" />
-
                 <Input value={avaluoDraft.recomendado_por} onChange={(e) => updateAvaluoDraft("recomendado_por", e.target.value)} placeholder="Recomendado por" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.evaluador_nombre} onChange={(e) => updateAvaluoDraft("evaluador_nombre", e.target.value)} placeholder="Evaluador" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.recibidor_nombre} onChange={(e) => updateAvaluoDraft("recibidor_nombre", e.target.value)} placeholder="Recibidor" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.enderezador_nombre} onChange={(e) => updateAvaluoDraft("enderezador_nombre", e.target.value)} placeholder="Enderezador" className="bg-secondary border-border" />
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground font-semibold uppercase">Observaciones del cliente</label>
@@ -1285,122 +1285,136 @@ export default function OrdenDetalle() {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Vehicle */}
-          <div className="data-card space-y-3">
-            <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
-              <Car size={16} className="text-primary" /> Vehículo
-            </h3>
-            {[["Placa", orden.placa], ["Marca / Modelo", `${orden.marca} ${orden.modelo}`], ["Año", String(orden.anio)], ["Color", orden.color], ["Código Pintura", orden.codigo_pintura], ["Kilometraje", orden.kilometraje ? `${orden.kilometraje.toLocaleString()} km` : null], ["N° Predio", orden.numero_predio]].map(item => item[1] ? (
-              <div key={item[0]} className="flex justify-between text-sm border-b border-border/40 pb-2">
-                <span className="text-muted-foreground">{item[0]}</span>
-                <span className="font-medium text-right">{item[1]}</span>
-              </div>
-            ) : null)}
-          </div>
-
-          {/* Client */}
-          <div className="data-card space-y-3">
-            <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
-              <User size={16} className="text-primary" /> Cliente
-            </h3>
-            {[["Nombre", orden.cliente_nombre], ["Teléfono", orden.cliente_telefono], ["Cédula", orden.cliente_cedula], ["Procedencia", orden.lugar_procedencia], ["Recomendado por", orden.recomendado_por], ["Fecha Ingreso", formatDisplayDateTime(orden.fecha_ingreso)]].map(item => item[1] ? (
-              <div key={item[0]} className="flex justify-between text-sm border-b border-border/40 pb-2">
-                <span className="text-muted-foreground">{item[0]}</span>
-                <span className="font-medium text-right">{item[1]}</span>
-              </div>
-            ) : null)}
-          </div>
-
-          {/* Personnel */}
-          <div className="data-card space-y-3">
-            <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
-              <Wrench size={16} className="text-primary" /> Personal
-            </h3>
-            {[["Evaluador", orden.evaluador_nombre], ["Recibidor", orden.recibidor_nombre], ["Enderezador", orden.enderezador_nombre]].map(item => item[1] ? (
-              <div key={item[0]} className="flex justify-between text-sm border-b border-border/40 pb-2">
-                <span className="text-muted-foreground">{item[0]}</span>
-                <span className="font-medium">{item[1]}</span>
-              </div>
-            ) : null)}
-          </div>
-
-          {/* Insurance / Financial */}
-          <div className="data-card space-y-3">
-            <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
-              <Shield size={16} className="text-primary" /> Seguro y Financiero
-            </h3>
-            <div className="flex justify-between text-sm border-b border-border/40 pb-2">
-              <span className="text-muted-foreground">Tipo</span>
-              <span className={`font-semibold ${orden.es_asegurado ? "text-primary" : "text-muted-foreground"}`}>
-                {orden.es_asegurado ? "Asegurado" : "Particular"}
-              </span>
-            </div>
-            {orden.es_asegurado && (
-              <>
-                {[["Aseguradora", orden.aseguradora], ["Monto Autorizado", orden.monto_autorizado_seguro ? formatColones(orden.monto_autorizado_seguro, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : null]].map(item => item[1] ? (
-                  <div key={item[0]} className="flex justify-between text-sm border-b border-border/40 pb-2">
-                    <span className="text-muted-foreground">{item[0]}</span>
-                    <span className="font-medium">{item[1]}</span>
-                  </div>
-                ) : null)}
-                <div className="flex justify-between items-center text-sm border-b border-border/40 pb-2 gap-4">
-                  <span className="text-muted-foreground whitespace-nowrap">N° Reclamo</span>
-                  <Input
-                    value={orden.numero_reclamo || ""}
-                    onChange={e => {
-                      const clean = e.target.value.replace(/[^A-Za-z0-9-]/g, "").toUpperCase();
-                      setOrden(prev => ({ ...prev, numero_reclamo: clean }));
-                    }}
-                    onBlur={async () => {
-                      await base44.entities.OrdenTrabajo.update(id, { numero_reclamo: orden.numero_reclamo });
-                    }}
-                    placeholder="SIN-2026-00001"
-                    className="bg-secondary border-border h-7 text-sm text-right w-44"
-                  />
+            {/* Vehicle */}
+            <div className="data-card space-y-3">
+              <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
+                <Car size={16} className="text-primary" /> Vehículo
+              </h3>
+              {[["Placa", orden.placa], ["Marca / Modelo", `${orden.marca} ${orden.modelo}`], ["Año", String(orden.anio)], ["Color", orden.color], ["Código Pintura", orden.codigo_pintura], ["Kilometraje", orden.kilometraje ? `${orden.kilometraje.toLocaleString()} km` : null], ["N° Predio", orden.numero_predio]].map(item => item[1] ? (
+                <div key={item[0]} className="flex justify-between text-sm border-b border-border/40 pb-2">
+                  <span className="text-muted-foreground">{item[0]}</span>
+                  <span className="font-medium text-right">{item[1]}</span>
                 </div>
-              </>
-            )}
-            <div className="flex justify-between text-sm border-b border-border/40 pb-2">
-              <span className="text-muted-foreground">Adelanto</span>
-              <span className="font-medium text-green-400">{formatColones(orden.adelanto_dinero || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+              ) : null)}
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Total Horas Avalúo</span>
-              <span className="font-bold">{totalHorasAvaluo}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Total Cotizado</span>
-              <span className="font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
-            </div>
-          </div>
 
-          <div className="data-card space-y-3 md:col-span-2">
-            <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
-              <FileText size={16} className="text-primary" /> Observaciones del Cliente
-            </h3>
-            <div className="rounded-md border border-border bg-secondary/20 p-4 min-h-24">
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                {String(orden.descripcion_danos || "").trim() || "Sin observaciones del cliente."}
-              </p>
+            {/* Client */}
+            <div className="data-card space-y-3">
+              <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
+                <User size={16} className="text-primary" /> Cliente
+              </h3>
+              {[["Nombre", orden.cliente_nombre], ["Teléfono", orden.cliente_telefono], ["Cédula", orden.cliente_cedula], ["Procedencia", orden.lugar_procedencia], ["Recomendado por", orden.recomendado_por], ["Fecha Ingreso", formatDisplayDateTime(orden.fecha_ingreso)]].map(item => item[1] ? (
+                <div key={item[0]} className="flex justify-between text-sm border-b border-border/40 pb-2">
+                  <span className="text-muted-foreground">{item[0]}</span>
+                  <span className="font-medium text-right">{item[1]}</span>
+                </div>
+              ) : null)}
             </div>
-          </div>
+
+            {/* Personnel */}
+            <div className="data-card space-y-3">
+              <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
+                <Wrench size={16} className="text-primary" /> Personal
+              </h3>
+              {[["Evaluador", orden.evaluador_nombre], ["Recibidor", orden.recibidor_nombre], ["Enderezador", orden.enderezador_nombre]].map(item => item[1] ? (
+                <div key={item[0]} className="flex justify-between text-sm border-b border-border/40 pb-2">
+                  <span className="text-muted-foreground">{item[0]}</span>
+                  <span className="font-medium">{item[1]}</span>
+                </div>
+              ) : null)}
+            </div>
+
+            {/* Insurance / Financial */}
+            <div className="data-card space-y-3">
+              <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
+                <Shield size={16} className="text-primary" /> Seguro y Financiero
+              </h3>
+              <div className="flex justify-between text-sm border-b border-border/40 pb-2">
+                <span className="text-muted-foreground">Tipo</span>
+                <span className={`font-semibold ${orden.es_asegurado ? "text-primary" : "text-muted-foreground"}`}>
+                  {orden.es_asegurado ? "Asegurado" : "Particular"}
+                </span>
+              </div>
+              {orden.es_asegurado && (
+                <>
+                  {[["Aseguradora", orden.aseguradora], ["Monto Autorizado", orden.monto_autorizado_seguro ? formatColones(orden.monto_autorizado_seguro, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : null]].map(item => item[1] ? (
+                    <div key={item[0]} className="flex justify-between text-sm border-b border-border/40 pb-2">
+                      <span className="text-muted-foreground">{item[0]}</span>
+                      <span className="font-medium">{item[1]}</span>
+                    </div>
+                  ) : null)}
+                  <div className="flex justify-between items-center text-sm border-b border-border/40 pb-2 gap-4">
+                    <span className="text-muted-foreground whitespace-nowrap">N° Reclamo</span>
+                    <Input
+                      value={orden.numero_reclamo || ""}
+                      onChange={e => {
+                        const clean = e.target.value.replace(/[^A-Za-z0-9-]/g, "").toUpperCase();
+                        setOrden(prev => ({ ...prev, numero_reclamo: clean }));
+                      }}
+                      onBlur={async () => {
+                        await base44.entities.OrdenTrabajo.update(id, { numero_reclamo: orden.numero_reclamo });
+                      }}
+                      placeholder="SIN-2026-00001"
+                      className="bg-secondary border-border h-7 text-sm text-right w-44"
+                    />
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between text-sm border-b border-border/40 pb-2">
+                <span className="text-muted-foreground">Adelanto</span>
+                <span className="font-medium text-green-400">{formatColones(orden.adelanto_dinero || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Total Horas Avaluó</span>
+                <span className="font-bold">{totalHorasAvaluo}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Total Cotizado</span>
+                <span className="font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+              </div>
+            </div>
+
+            <div className="data-card space-y-3 md:col-span-2">
+              <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
+                <FileText size={16} className="text-primary" /> Observaciones del Cliente
+              </h3>
+              <div className="rounded-md border border-border bg-secondary/20 p-4 min-h-24">
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                  {String(orden.descripcion_danos || "").trim() || "Sin observaciones del cliente."}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Tab: Avalúo */}
+      {/* Tab: Avaluó */}
       {tab === "avaluo" && (
         <div className="data-card p-0 overflow-hidden">
           <div className="border-b border-border p-4 bg-secondary/10 space-y-4">
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setExportingCotizacion(true);
+                  try {
+                    generarReporteVehiculo(orden);
+                  } finally {
+                    setExportingCotizacion(false);
+                  }
+                }}
+                disabled={exportingCotizacion}
+                className="gap-2"
+              >
+                <FileText size={14} /> {exportingCotizacion ? "Generando..." : "Cotización"}
+              </Button>
               <Button variant="outline" onClick={exportarProformaPDF} disabled={exportingProforma} className="gap-2">
                 <FileText size={14} /> {exportingProforma ? "Generando..." : "Proforma"}
               </Button>
             </div>
-
             {canEditOrders && (
               <div>
-                <label className="text-xs text-muted-foreground font-semibold uppercase">Agregar producto al avalúo</label>
+                <label className="text-xs text-muted-foreground font-semibold uppercase">Agregar producto al avaluó</label>
                 <div className="relative mt-2 max-w-2xl">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -1422,7 +1436,7 @@ export default function OrdenDetalle() {
                             disabled={addingLinea}
                           >
                             <p className="text-sm font-medium text-foreground">{pieza.nombre}</p>
-                            <p className="text-xs text-muted-foreground">{pieza.categoria}{pieza.codigo ? ` · ${pieza.codigo}` : ""}</p>
+                            <p className="text-xs text-muted-foreground">{pieza.categoria}{pieza.codigo ? ` • ${pieza.codigo}` : ""}</p>
                           </button>
                         ))
                       ) : (
@@ -1434,6 +1448,7 @@ export default function OrdenDetalle() {
               </div>
             )}
           </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -1465,11 +1480,17 @@ export default function OrdenDetalle() {
                           <span>h</span>
                         </span>
                       </td>
-                      <td className="py-3 px-3 text-center">{l.flag_desarmado_montaje ? "✓" : "—"}</td>
-                      <td className="py-3 px-3 text-center">{l.flag_reparacion ? "✓" : "—"}</td>
-                      <td className="py-3 px-3 text-center">{l.flag_pintura ? "✓" : "—"}</td>
+                      <td className="py-3 px-3 text-center">
+                        {l.flag_desarmado_montaje ? <CheckCircle size={14} className="mx-auto text-green-400" /> : <span className="text-muted-foreground">-</span>}
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        {l.flag_reparacion ? <CheckCircle size={14} className="mx-auto text-green-400" /> : <span className="text-muted-foreground">-</span>}
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        {l.flag_pintura ? <CheckCircle size={14} className="mx-auto text-green-400" /> : <span className="text-muted-foreground">-</span>}
+                      </td>
                       <td className="py-3 px-4">
-                        <span className={`station-badge border text-xs ${
+                        <span className={`station-badge border ${
                           l.tipo_repuesto === "Nuevo" ? "bg-orange-500/20 text-orange-400 border-orange-500/30"
                           : l.tipo_repuesto === "UTS" ? "bg-red-500/20 text-red-400 border-red-500/30"
                           : l.tipo_repuesto === "Reparación" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
@@ -1479,7 +1500,7 @@ export default function OrdenDetalle() {
                         </span>
                       </td>
                       <td className="py-3 px-4 hidden lg:table-cell text-xs text-muted-foreground max-w-xs truncate">
-                        {l.descripcion_dano || "—"}
+                        {l.descripcion_dano || "-"}
                       </td>
                       <td className="py-3 px-4 text-right font-semibold text-primary">{formatColones(getLineaMontoCotizado(l), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                       {canEditOrders && (
@@ -1592,12 +1613,12 @@ export default function OrdenDetalle() {
                                   <Trash2 size={14} /> {deletingLineaId === l.id ? "Eliminando..." : "Eliminar línea"}
                                 </Button>
                                 <div className="flex gap-2">
-                                <Button variant="outline" onClick={cancelEditLinea} disabled={savingLineaId === l.id || deletingLineaId === l.id} className="gap-2">
-                                  <X size={14} /> Cancelar
-                                </Button>
-                                <Button onClick={() => saveLinea(l)} disabled={savingLineaId === l.id || deletingLineaId === l.id} className="gap-2">
-                                  <Save size={14} /> {savingLineaId === l.id ? "Guardando..." : "Guardar"}
-                                </Button>
+                                  <Button variant="outline" onClick={cancelEditLinea} disabled={savingLineaId === l.id || deletingLineaId === l.id} className="gap-2">
+                                    <X size={14} /> Cancelar
+                                  </Button>
+                                  <Button onClick={() => saveLinea(l)} disabled={savingLineaId === l.id || deletingLineaId === l.id} className="gap-2">
+                                    <Save size={14} /> {savingLineaId === l.id ? "Guardando..." : "Guardar"}
+                                  </Button>
                                 </div>
                               </div>
                             </div>
@@ -1634,7 +1655,7 @@ export default function OrdenDetalle() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h4 className="font-heading font-bold uppercase tracking-wide text-sm">Mano de Obra</h4>
-                <p className="text-xs text-muted-foreground">Agregue rubros adicionales de mano de obra para sumarlos al total final del avalúo.</p>
+                <p className="text-xs text-muted-foreground">Agregue rubros adicionales de mano de obra para sumarlos al total final del avaluó.</p>
               </div>
             </div>
 
@@ -1725,6 +1746,7 @@ export default function OrdenDetalle() {
         </div>
       )}
 
+      {/* Tab: Comparativa INS */}
       {tab === "comparativa-ins" && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           <div className="data-card space-y-4">
@@ -1733,7 +1755,7 @@ export default function OrdenDetalle() {
                 <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
                   <FileText size={16} className="text-primary" /> Documentación INS
                 </h3>
-                <p className="text-xs text-muted-foreground mt-1">Adjunta y abre aquí los PDFs enviados por INS para compararlos manualmente con el avalúo.</p>
+                <p className="text-xs text-muted-foreground mt-1">Adjunta y abre aquí los PDFs enviados por INS para compararlos manualmente con el avaluó.</p>
               </div>
               {canEditOrders && (
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border bg-secondary px-3 py-2 text-sm hover:border-primary transition-colors">
@@ -1797,14 +1819,14 @@ export default function OrdenDetalle() {
           <div className="data-card space-y-4">
             <div>
               <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
-                <Wrench size={16} className="text-primary" /> Avalúo Manual
+                <Wrench size={16} className="text-primary" /> Avaluó Manual
               </h3>
               <p className="text-xs text-muted-foreground mt-1">Usa esta lista para contrastar las piezas registradas manualmente contra el PDF del INS.</p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-lg border border-border bg-secondary/30 p-3">
-                <p className="text-xs uppercase text-muted-foreground">Piezas Avalúo</p>
+                <p className="text-xs uppercase text-muted-foreground">Piezas Avaluó</p>
                 <p className="text-2xl font-heading font-bold text-primary">{lineas.length}</p>
               </div>
               <div className="rounded-lg border border-border bg-secondary/30 p-3">
@@ -1812,7 +1834,7 @@ export default function OrdenDetalle() {
                 <p className="text-2xl font-heading font-bold text-primary">{lineasConRepuesto.length}</p>
               </div>
               <div className="rounded-lg border border-border bg-secondary/30 p-3">
-                <p className="text-xs uppercase text-muted-foreground">Total Avalúo</p>
+                <p className="text-xs uppercase text-muted-foreground">Total Avaluó</p>
                 <p className="text-xl font-heading font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
               </div>
             </div>
@@ -1859,7 +1881,7 @@ export default function OrdenDetalle() {
               </div>
             ) : (
               <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
-                No hay líneas de avalúo cargadas para comparar.
+                No hay líneas de avaluó cargadas para comparar.
               </div>
             )}
           </div>
@@ -1894,7 +1916,7 @@ export default function OrdenDetalle() {
                         : "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
                       }`}>{c.estado}</span>
                     </td>
-                    <td className="py-3 px-4 text-xs text-muted-foreground hidden md:table-cell">{c.descripcion_dano || "—"}</td>
+                    <td className="py-3 px-4 text-xs text-muted-foreground hidden md:table-cell">{c.descripcion_dano || "-"}</td>
                   </tr>
                 ))}
                 {compras.length === 0 && (
@@ -1963,6 +1985,7 @@ export default function OrdenDetalle() {
               <p>No hay fotos registradas para esta orden</p>
             </div>
           )}
+
           {fotosView.some((f) => !f.url) && (
             <p className="text-xs text-yellow-400 mt-3">
               Algunas fotos antiguas no se pueden mostrar porque fueron guardadas con URL temporal (blob).

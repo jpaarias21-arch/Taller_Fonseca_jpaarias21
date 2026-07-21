@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, ClipboardList, Kanban, ShoppingCart,
   Package, Users, ChevronLeft, ChevronRight, Menu,
-  Wrench, LogOut, BarChart
+  Wrench, LogOut, BarChart, MessageCircle
 } from "lucide-react";
 import Footer from "./Footer";
 import ColonIcon from "./ColonIcon";
@@ -20,6 +20,7 @@ const navItems = [
   { path: "/catalogo", icon: Wrench, label: "Catálogo Piezas" },
   { path: "/precios", icon: ColonIcon, label: "Lista de Precios" },
   { path: "/reportes", icon: BarChart, label: "Reportes" },
+  { path: "/chat", icon: MessageCircle, label: "Chat General" },
 ];
 
 export default function Layout() {

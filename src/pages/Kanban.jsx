@@ -26,6 +26,31 @@ const STATIONS = [
 
 const OPERATIVE = ["Desarmado", "Enderezado", "Preparación", "Cabina de Pintura", "Armado", "Pulido", "Control de Calidad", "Entregado"];
 
+/** Calcular días que la orden lleva en la estación actual */
+const getDaysInCurrentStation = (orden) => {
+  const historial = orden.historial_kanban;
+  if (!Array.isArray(historial) || historial.length === 0) return 0;
+
+  // Buscar la última entrada que corresponda a la estación actual
+  const currentStation = orden.estado_kanban;
+  const entriesForStation = historial
+    .filter(h => h.estacion === currentStation)
+    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+  if (entriesForStation.length === 0) {
+    // Si no hay historial para la estación actual, usar created_date
+    const created = orden.created_date || orden.fecha_ingreso;
+    if (!created) return 0;
+    return Math.floor((Date.now() - new Date(created).getTime()) / (1000 * 60 * 60 * 24));
+  }
+
+  const lastEntry = entriesForStation[0];
+  const entryDate = new Date(lastEntry.fecha).getTime();
+  if (isNaN(entryDate)) return 0;
+
+  return Math.floor((Date.now() - entryDate) / (1000 * 60 * 60 * 24));
+};
+
 function KanbanCard({ orden, onMove, onDelete }) {
   const { toast } = useToast();
   const { canMoveKanban, canEditOrders } = useRole();
@@ -38,6 +63,8 @@ function KanbanCard({ orden, onMove, onDelete }) {
   const [deleting, setDeleting] = useState(false);
   const currentIdx = STATIONS.findIndex(s => s.id === orden.estado_kanban);
   const isApproved = orden.estado_cotizacion === "Aprobado" || orden.estado_cotizacion === "Autorizado por Seguro";
+  const daysInStation = getDaysInCurrentStation(orden);
+  const isStuck = daysInStation > 3;
 
   const hasWhatsappPhone = Boolean(normalizeWhatsAppPhone(orden?.cliente_telefono));
 
@@ -195,6 +222,15 @@ function KanbanCard({ orden, onMove, onDelete }) {
           </Link>
         </div>
       </div>
+
+      {/* ⏱ Indicador de estancamiento — más de 3 días en la misma estación */}
+      {isStuck && (
+        <div className="mb-2 flex items-center gap-1.5 text-xs bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded px-2 py-1">
+          <AlertTriangle size={12} className="flex-shrink-0" />
+          <span className="font-semibold">{daysInStation} días</span>
+          <span className="text-amber-400/80">en esta estación</span>
+        </div>
+      )}
 
       {/* Client */}
       <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">

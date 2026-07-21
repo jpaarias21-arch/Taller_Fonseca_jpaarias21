@@ -46,13 +46,13 @@ export function formatColones(value, options = {}) {
     return new Intl.NumberFormat("es-CR", {
       style: "currency",
       currency: "CRC",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
     }).format(0);
   }
 
-  const minimumFractionDigits = options.minimumFractionDigits ?? 2;
-  const maximumFractionDigits = options.maximumFractionDigits ?? 2;
+  const minimumFractionDigits = options.minimumFractionDigits ?? 0;
+  const maximumFractionDigits = options.maximumFractionDigits ?? 0;
 
   return new Intl.NumberFormat("es-CR", {
     style: "currency",
