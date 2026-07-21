@@ -1408,9 +1408,6 @@ export default function OrdenDetalle() {
               >
                 <FileText size={14} /> {exportingCotizacion ? "Generando..." : "Cotización"}
               </Button>
-              <Button variant="outline" onClick={exportarProformaPDF} disabled={exportingProforma} className="gap-2">
-                <FileText size={14} /> {exportingProforma ? "Generando..." : "Proforma"}
-              </Button>
             </div>
             {canEditOrders && (
               <div>

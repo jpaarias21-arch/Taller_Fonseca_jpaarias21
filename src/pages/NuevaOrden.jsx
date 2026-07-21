@@ -374,7 +374,6 @@ export default function NuevaOrden() {
     })();
 
     try {
-      const montoCotizado = lineas.reduce((sum, linea) => sum + getLineaMontoCotizado(linea), 0);
       const ordenData = {
         ...formCompleto,
         fecha_ingreso: fechaIngresoConHora,
@@ -387,7 +386,7 @@ export default function NuevaOrden() {
         documentos_ins: documentosIns,
         estado_cotizacion: "Borrador",
         estado_kanban: "Recepción",
-        monto_cotizado: montoCotizado,
+        monto_cotizado: 0,
         historial_kanban: [{ estacion: "Recepción", fecha: new Date().toISOString(), tecnico: formCompleto.evaluador_nombre || "Sistema" }],
       };
 
@@ -396,38 +395,9 @@ export default function NuevaOrden() {
 
       const orden = await base44.entities.OrdenTrabajo.create(ordenData);
 
-      const lineResults = await Promise.allSettled(
-        lineas.map((linea) => {
-          const cantidad = getLineaCantidad(linea);
-          const subtotal = getLineaMontoCotizado({ ...linea, cantidad });
-          const requiereDescripcion = linea.tipo_repuesto === "Nuevo" || linea.tipo_repuesto === "UTS";
-          const descripcion_dano = String(linea.descripcion_dano || "").trim() || (requiereDescripcion ? "Pendiente por completar" : "");
+      toast({ title: "Orden creada", description: `${numeroOrden} registrada exitosamente.` });
 
-          const { costo_mano_obra, ...lineaPayload } = linea;
-
-          return base44.entities.LineaAvaluo.create({
-            ...lineaPayload,
-            descripcion_dano,
-            cantidad,
-            orden_id: orden.id,
-            subtotal,
-            es_ampliacion: false,
-          });
-        })
-      );
-
-      const failedLines = lineResults.filter((result) => result.status === "rejected");
-
-      if (failedLines.length > 0) {
-        console.error("Error creando lineas de avaluo:", failedLines);
-        toast({
-          title: "Orden creada con advertencias",
-          description: `${numeroOrden} se guardó, pero ${failedLines.length} línea(s) no pudieron registrarse.`,
-          variant: "destructive"
-        });
-      } else {
-        toast({ title: "Orden creada", description: `${numeroOrden} registrada exitosamente.` });
-      }
+      navigate(`/ordenes/${orden.id}`);
 
       navigate(`/ordenes/${orden.id}`);
     } catch (error) {
@@ -715,23 +685,6 @@ export default function NuevaOrden() {
         </div>
       </div>
 
-      {/* Section 6: Damage lines */}
-      <div className="data-card space-y-4">
-        <h2 className="font-heading font-bold text-lg uppercase tracking-wide text-primary border-b border-border pb-2">
-          6. Líneas de Daño (Avalúo)
-        </h2>
-
-        <PiezaSelector piezas={piezas} onSelect={addLinea} />
-
-        {lineas.length === 0 && (
-          <div className="text-center py-8 text-muted-foreground text-sm border border-dashed border-border rounded-lg">
-            Busque y seleccione piezas del catálogo para agregar líneas de daño
-          </div>
-        )}
-
-        {/* ... mapeo de líneas existentes si aplica ... */}
-      </div>
-      
       {/* Botón de guardar para cerrar el bloque de vista de forma correcta */}
       <div className="flex justify-end gap-4 mt-6">
         <Button 
