@@ -6,10 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Package, Plus, Search, AlertTriangle, TrendingDown, Boxes, DollarSign, Lock, Upload, Download, Clock3 } from "lucide-react";
+import { Package, Plus, Search, AlertTriangle, TrendingDown, Boxes, DollarSign, Lock, Upload, Download, Clock3, FileText } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { formatColones, formatDisplayDateTime } from "@/lib/utils";
 import * as XLSX from "xlsx";
+import { generarReporteInventario } from "@/utils/generarReporteInventario";
 
 const CATEGORIAS = ["Pintura", "Lija", "Transparente", "Masilla", "Primer", "Thinner", "Repuesto Mecánico", "Herramienta", "Otro"];
 const UNIDADES = ["Litro", "Galón", "Unidad", "Kilo", "Metro", "Caja"];
@@ -342,6 +343,7 @@ export default function Inventario() {
   const [editProd, setEditProd] = useState(null);
   const [modalMov, setModalMov] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [exportingPDF, setExportingPDF] = useState(false);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -498,6 +500,23 @@ export default function Inventario() {
     }
   };
 
+  const handleExportPDF = async () => {
+    setExportingPDF(true);
+    try {
+      await generarReporteInventario(productos);
+      toast({ title: "PDF generado", description: "El reporte de inventario se descargó correctamente." });
+    } catch (error) {
+      console.error("Error al generar PDF:", error);
+      toast({
+        title: "Error al generar PDF",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingPDF(false);
+    }
+  };
+
   const searchLower = search.toLowerCase();
 
   const filtered = useMemo(() => {
@@ -610,6 +629,15 @@ export default function Inventario() {
               className="border-border font-semibold gap-2 uppercase tracking-wide"
             >
               <Upload size={16} /> {importing ? "Importando..." : "Cargar Excel"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleExportPDF}
+              disabled={exportingPDF}
+              className="border-border font-semibold gap-2 uppercase tracking-wide"
+            >
+              <FileText size={16} /> {exportingPDF ? "Generando..." : "Reporte PDF"}
             </Button>
             <Button onClick={() => { setEditProd(null); setModalProd(true); }}
               className="bg-primary text-primary-foreground font-semibold gap-2 uppercase tracking-wide">
