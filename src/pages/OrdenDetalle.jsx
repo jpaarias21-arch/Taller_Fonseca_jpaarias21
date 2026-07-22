@@ -38,6 +38,21 @@ const KANBAN_STATIONS = [
 
 const OPERATIVE_STATIONS = ["Desarmado", "Enderezado", "Preparación", "Cabina de Pintura", "Armado", "Pulido", "Control de Calidad", "Entregado"];
 
+const INITIAL_NUEVA_LINEA = {
+  pieza_nombre: "",
+  pieza_categoria: "General",
+  cantidad: "1",
+  horas_dm: "",
+  horas_reparacion: "",
+  costo_pintura: "",
+  costo_repuesto: "",
+  flag_desarmado_montaje: false,
+  flag_reparacion: false,
+  flag_pintura: false,
+  tipo_repuesto: "Ninguno",
+  descripcion_dano: "",
+};
+
 const normalizeText = (value) =>
   String(value || "")
     .normalize("NFD")
@@ -85,13 +100,10 @@ const getStoredFileName = (value, fallback = "Documento") => {
 const getLineaCantidad = (linea) => Math.max(1, Number(linea?.cantidad) || 1);
 const getLineaHoras = (linea) =>
   (Number(linea?.horas_dm) || 0) + (Number(linea?.horas_reparacion) || 0);
-
 const getLineaMontoCotizado = (linea) =>
   (Number(linea?.costo_pintura) || 0) + ((Number(linea?.costo_repuesto) || 0) * getLineaCantidad(linea));
-
 const getManoObraConcepto = (item) =>
   String(item?.concepto || item?.descripcion || item?.nombre || item?.detalle || "").trim();
-
 const getManoObraMonto = (item) =>
   Number(item?.monto ?? item?.total ?? item?.precio ?? 0) || 0;
 
@@ -148,6 +160,11 @@ export default function OrdenDetalle() {
   const [piezasCatalogo, setPiezasCatalogo] = useState([]);
   const [piezaQuery, setPiezaQuery] = useState("");
   const [addingLinea, setAddingLinea] = useState(false);
+
+  // Estados para Ingreso Manual de Líneas
+  const [showFormManual, setShowFormManual] = useState(false);
+  const [nuevaLineaDraft, setNuevaLineaDraft] = useState(INITIAL_NUEVA_LINEA);
+  const [addingLineaManual, setAddingLineaManual] = useState(false);
 
   const [editingLineaId, setEditingLineaId] = useState(null);
   const [lineaDraft, setLineaDraft] = useState(null);
@@ -270,8 +287,10 @@ export default function OrdenDetalle() {
           return { id: `${i}-pub`, index: i, url: pub.data?.publicUrl || raw };
         })
       );
+
       if (!cancelled) setFotosView(resolved);
     };
+
     resolveFotos();
     return () => {
       cancelled = true;
@@ -293,19 +312,24 @@ export default function OrdenDetalle() {
           }
           const path = extractUploadsPath(raw);
           const fallbackName = getStoredFileName(raw, `Documento INS ${i + 1}`);
+
           if (!path) {
             return { id: `${i}-url`, url: raw, name: fallbackName };
           }
+
           const signed = await supabase.storage.from("uploads").createSignedUrl(path, 60 * 60 * 24 * 7);
           if (signed.data?.signedUrl) {
             return { id: `${i}-signed`, url: signed.data.signedUrl, name: fallbackName };
           }
+
           const pub = supabase.storage.from("uploads").getPublicUrl(path);
           return { id: `${i}-pub`, url: pub.data?.publicUrl || raw, name: fallbackName };
         })
       );
+
       if (!cancelled) setDocumentosInsView(resolved);
     };
+
     resolveDocumentosIns();
     return () => {
       cancelled = true;
@@ -329,6 +353,7 @@ export default function OrdenDetalle() {
           });
           continue;
         }
+
         const { file_url } = await base44.integrations.Core.UploadFile({ file });
         uploaded.push(file_url);
       }
@@ -340,6 +365,7 @@ export default function OrdenDetalle() {
 
       await base44.entities.OrdenTrabajo.update(id, { documentos_ins: documentosNuevos });
       setOrden((prev) => ({ ...prev, documentos_ins: documentosNuevos }));
+
       toast({ title: "Documentación INS cargada", description: `${uploaded.length} PDF(s) agregados.` });
     } catch (error) {
       toast({
@@ -359,6 +385,7 @@ export default function OrdenDetalle() {
 
       await base44.entities.OrdenTrabajo.update(id, { documentos_ins: documentosNuevos });
       setOrden((prev) => ({ ...prev, documentos_ins: documentosNuevos }));
+
       toast({ title: "Documento eliminado" });
     } catch (error) {
       toast({
@@ -386,6 +413,7 @@ export default function OrdenDetalle() {
           });
           continue;
         }
+
         const { file_url } = await base44.integrations.Core.UploadFile({ file });
         uploaded.push(file_url);
       }
@@ -397,6 +425,7 @@ export default function OrdenDetalle() {
 
       await base44.entities.OrdenTrabajo.update(id, { fotos: fotosNuevas });
       setOrden((prev) => ({ ...prev, fotos: fotosNuevas }));
+
       toast({ title: "Fotos cargadas", description: `${uploaded.length} foto(s) agregadas.` });
     } catch (error) {
       toast({
@@ -416,6 +445,7 @@ export default function OrdenDetalle() {
 
       await base44.entities.OrdenTrabajo.update(id, { fotos: fotosNuevas });
       setOrden((prev) => ({ ...prev, fotos: fotosNuevas }));
+
       toast({ title: "Foto eliminada" });
     } catch (error) {
       toast({
@@ -453,7 +483,6 @@ export default function OrdenDetalle() {
 
     setOrden(prev => ({ ...prev, estado_cotizacion: nuevoEstado }));
     setUpdatingEstado(false);
-
     const reqs = await base44.entities.RequerimientoCompra.filter({ orden_id: id });
     setCompras(reqs);
   };
@@ -515,7 +544,6 @@ export default function OrdenDetalle() {
     try {
       setSendingWhatsapp(true);
       let updatedOrder = null;
-
       try {
         updatedOrder = await OrdenTrabajoAPI.actualizarEstatusKanbanConHistorial(id, pendingWhatsappStatus, pendingKanbanHistorial);
       } catch {
@@ -677,7 +705,6 @@ export default function OrdenDetalle() {
 
   const deleteLinea = async (linea) => {
     if (!linea?.id) return;
-
     const confirmed = window.confirm(`¿Eliminar la línea "${linea.pieza_nombre}" del avaluó?`);
     if (!confirmed) return;
 
@@ -785,6 +812,70 @@ export default function OrdenDetalle() {
     }
   };
 
+  const agregarLineaManual = async () => {
+    const piezaNombre = String(nuevaLineaDraft.pieza_nombre || "").trim();
+    if (!piezaNombre) {
+      toast({
+        title: "Nombre requerido",
+        description: "Ingrese el nombre de la pieza o trabajo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const payload = {
+      orden_id: id,
+      pieza_nombre: piezaNombre,
+      pieza_categoria: nuevaLineaDraft.pieza_categoria || "General",
+      cantidad: Math.max(1, Number(nuevaLineaDraft.cantidad) || 1),
+      horas_dm: Number(nuevaLineaDraft.horas_dm) || 0,
+      horas_reparacion: Number(nuevaLineaDraft.horas_reparacion) || 0,
+      costo_pintura: Number(nuevaLineaDraft.costo_pintura) || 0,
+      costo_repuesto: Number(nuevaLineaDraft.costo_repuesto) || 0,
+      flag_desarmado_montaje: Boolean(nuevaLineaDraft.flag_desarmado_montaje),
+      flag_reparacion: Boolean(nuevaLineaDraft.flag_reparacion),
+      flag_pintura: Boolean(nuevaLineaDraft.flag_pintura),
+      tipo_repuesto: nuevaLineaDraft.tipo_repuesto,
+      descripcion_dano: String(nuevaLineaDraft.descripcion_dano || "").trim(),
+      es_ampliacion: true,
+    };
+
+    if ((payload.tipo_repuesto === "Nuevo" || payload.tipo_repuesto === "UTS") && !payload.descripcion_dano) {
+      toast({
+        title: "Descripción técnica requerida",
+        description: "Las líneas con repuesto Nuevo o UTS requieren justificación técnica.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    payload.subtotal = getLineaMontoCotizado(payload);
+    setAddingLineaManual(true);
+
+    try {
+      const nuevaLinea = await base44.entities.LineaAvaluo.create(payload);
+      const updatedLineas = [...lineas, nuevaLinea];
+      const montoCotizado = calcularTotalCotizado(updatedLineas, manoObraItems);
+
+      await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
+
+      setLineas(updatedLineas);
+      setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
+      setNuevaLineaDraft(INITIAL_NUEVA_LINEA);
+      setShowFormManual(false);
+
+      toast({ title: "Línea agregada", description: "La línea manual fue insertada en el avaluó." });
+    } catch (error) {
+      toast({
+        title: "No se pudo agregar la línea",
+        description: error?.message || "Intente nuevamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setAddingLineaManual(false);
+    }
+  };
+
   const agregarManoObra = async () => {
     const concepto = String(manoObraDraft.concepto || "").trim();
     const monto = Number(String(manoObraDraft.monto || "").replace(/[^\d]/g, "")) || 0;
@@ -846,7 +937,6 @@ export default function OrdenDetalle() {
 
   const deleteManoObra = async (item) => {
     if (!item?.id) return;
-
     const confirmed = window.confirm(`¿Eliminar el rubro de mano de obra "${getManoObraConcepto(item) || "sin concepto"}"?`);
     if (!confirmed) return;
 
@@ -997,12 +1087,14 @@ export default function OrdenDetalle() {
       y += 12;
 
       doc.setFont("helvetica", "normal");
+
       lineasDanio.forEach((linea) => {
         const pieza = String(linea.pieza_nombre || "Pieza");
         const piezasTexto = doc.splitTextToSize(pieza, 220);
         const rowHeight = Math.max(16, piezasTexto.length * 11 + 2);
 
         ensureSpace(rowHeight + 6);
+
         doc.text(piezasTexto, colPieza, y);
         doc.text(String(getLineaCantidad(linea)), colCant, y);
         doc.text(String(getLineaHoras(linea)), colHoras, y);
@@ -1013,6 +1105,7 @@ export default function OrdenDetalle() {
           y,
           { align: "right" }
         );
+
         y += rowHeight;
         doc.setDrawColor(60);
         doc.line(margin, y - 4, pageWidth - margin, y - 4);
@@ -1060,7 +1153,6 @@ export default function OrdenDetalle() {
 
       const safeOrder = String(orden.numero_orden || orden.placa || "orden").replace(/[^a-zA-Z0-9-_]/g, "_");
       doc.save(`Proforma-${safeOrder}.pdf`);
-
       toast({ title: "Proforma exportada", description: "Se descargó el PDF correctamente." });
     } catch (error) {
       toast({
@@ -1144,7 +1236,6 @@ export default function OrdenDetalle() {
                 </div>
               )}
             </div>
-
             <div>
               <p className="text-xs text-muted-foreground mb-1 font-semibold uppercase flex items-center gap-1">
                 Estación Kanban {!canMoveKanban && <Lock size={11} className="text-muted-foreground" />}
@@ -1163,12 +1254,10 @@ export default function OrdenDetalle() {
               )}
             </div>
           </div>
-
           <div className="text-right">
             <p className="text-xs text-muted-foreground font-semibold uppercase">Total Horas</p>
             <p className="text-2xl font-heading font-bold text-foreground">{totalHorasAvaluo}</p>
           </div>
-
           <div className="text-right">
             <p className="text-xs text-muted-foreground font-semibold uppercase">Total Cotizado</p>
             <p className="text-2xl font-heading font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
@@ -1335,6 +1424,7 @@ export default function OrdenDetalle() {
                   {orden.es_asegurado ? "Asegurado" : "Particular"}
                 </span>
               </div>
+
               {orden.es_asegurado && (
                 <>
                   {[["Aseguradora", orden.aseguradora], ["Monto Autorizado", orden.monto_autorizado_seguro ? formatColones(orden.monto_autorizado_seguro, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : null]].map(item => item[1] ? (
@@ -1360,6 +1450,7 @@ export default function OrdenDetalle() {
                   </div>
                 </>
               )}
+
               <div className="flex justify-between text-sm border-b border-border/40 pb-2">
                 <span className="text-muted-foreground">Adelanto</span>
                 <span className="font-medium text-green-400">{formatColones(orden.adelanto_dinero || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
@@ -1395,6 +1486,14 @@ export default function OrdenDetalle() {
             <div className="flex justify-end gap-2">
               <Button
                 variant="outline"
+                onClick={exportarProformaPDF}
+                disabled={exportingProforma}
+                className="gap-2"
+              >
+                <FileText size={14} /> {exportingProforma ? "Exportando..." : "Exportar Proforma"}
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => {
                   setExportingCotizacion(true);
                   try {
@@ -1409,19 +1508,36 @@ export default function OrdenDetalle() {
                 <FileText size={14} /> {exportingCotizacion ? "Generando..." : "Cotización"}
               </Button>
             </div>
+
             {canEditOrders && (
-              <div>
-                <label className="text-xs text-muted-foreground font-semibold uppercase">Agregar producto al avaluó</label>
-                <div className="relative mt-2 max-w-2xl">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-muted-foreground font-semibold uppercase">
+                    Agregar producto al avaluó
+                  </label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowFormManual(!showFormManual)}
+                    className="gap-2 text-xs"
+                  >
+                    {showFormManual ? <X size={14} /> : <Pencil size={14} />}
+                    {showFormManual ? "Cerrar ingreso manual" : "Ingreso Manual / Personalizado"}
+                  </Button>
+                </div>
+
+                {/* Buscador de Catálogo */}
+                <div className="relative max-w-2xl">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={piezaQuery}
                     onChange={e => setPiezaQuery(e.target.value)}
                     placeholder="Buscar pieza del catálogo por nombre, código o categoría..."
                     className="pl-9 bg-secondary border-border"
-                    disabled={addingLinea}
+                    disabled={addingLinea || showFormManual}
                   />
-                  {piezaQuery.trim() && (
+
+                  {piezaQuery.trim() && !showFormManual && (
                     <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-xl">
                       {piezasFiltradas.length > 0 ? (
                         piezasFiltradas.map((pieza) => (
@@ -1442,6 +1558,139 @@ export default function OrdenDetalle() {
                     </div>
                   )}
                 </div>
+
+                {/* Formulario de Entrada Manual Directa */}
+                {showFormManual && (
+                  <div className="p-4 rounded-lg border border-border bg-secondary/20 space-y-4 mt-3">
+                    <h4 className="font-heading font-bold text-sm uppercase tracking-wide">Nueva Línea Manual</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="md:col-span-2">
+                        <label className="text-xs text-muted-foreground font-semibold uppercase">Pieza / Trabajo</label>
+                        <Input
+                          value={nuevaLineaDraft.pieza_nombre}
+                          onChange={(e) => setNuevaLineaDraft((prev) => ({ ...prev, pieza_nombre: e.target.value }))}
+                          placeholder="Ej: Guardabarros Delantero Izquierdo"
+                          className="bg-secondary border-border mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-semibold uppercase">Categoría</label>
+                        <Input
+                          value={nuevaLineaDraft.pieza_categoria}
+                          onChange={(e) => setNuevaLineaDraft((prev) => ({ ...prev, pieza_categoria: e.target.value }))}
+                          placeholder="Ej: Carrocería"
+                          className="bg-secondary border-border mt-1"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                      <div>
+                        <label className="text-xs text-muted-foreground font-semibold uppercase">Cantidad</label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={nuevaLineaDraft.cantidad}
+                          onChange={(e) => setNuevaLineaDraft((prev) => ({ ...prev, cantidad: e.target.value.replace(/\D/g, "") }))}
+                          className="bg-secondary border-border mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-semibold uppercase">Horas D&M</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={nuevaLineaDraft.horas_dm}
+                          onChange={(e) => setNuevaLineaDraft((prev) => ({ ...prev, horas_dm: e.target.value.replace(/\D/g, "") }))}
+                          className="bg-secondary border-border mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-semibold uppercase">Horas Rep.</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={nuevaLineaDraft.horas_reparacion}
+                          onChange={(e) => setNuevaLineaDraft((prev) => ({ ...prev, horas_reparacion: e.target.value.replace(/\D/g, "") }))}
+                          className="bg-secondary border-border mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-semibold uppercase">Costo Pintura</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={nuevaLineaDraft.costo_pintura}
+                          onChange={(e) => setNuevaLineaDraft((prev) => ({ ...prev, costo_pintura: e.target.value.replace(/\D/g, "") }))}
+                          className="bg-secondary border-border mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-semibold uppercase">Costo Repuesto</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={nuevaLineaDraft.costo_repuesto}
+                          onChange={(e) => setNuevaLineaDraft((prev) => ({ ...prev, costo_repuesto: e.target.value.replace(/\D/g, "") }))}
+                          className="bg-secondary border-border mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-semibold uppercase">Tipo Repuesto</label>
+                        <Select
+                          value={nuevaLineaDraft.tipo_repuesto}
+                          onValueChange={(val) => setNuevaLineaDraft((prev) => ({ ...prev, tipo_repuesto: val }))}
+                        >
+                          <SelectTrigger className="bg-secondary border-border mt-1"><SelectValue /></SelectTrigger>
+                          <SelectContent className="bg-card border-border">
+                            <SelectItem value="Ninguno">Ninguno</SelectItem>
+                            <SelectItem value="Nuevo">Nuevo</SelectItem>
+                            <SelectItem value="Reparación">Reparación</SelectItem>
+                            <SelectItem value="UTS">UTS</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-4">
+                      {[
+                        ["flag_desarmado_montaje", "D&M"],
+                        ["flag_reparacion", "Reparación"],
+                        ["flag_pintura", "Pintura"],
+                      ].map(([key, label]) => (
+                        <label key={key} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(nuevaLineaDraft[key])}
+                            onChange={(e) => setNuevaLineaDraft((prev) => ({ ...prev, [key]: e.target.checked }))}
+                            className="w-4 h-4 accent-yellow-400"
+                          />
+                          <span>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-muted-foreground font-semibold uppercase">Descripción / Observaciones</label>
+                      <Textarea
+                        value={nuevaLineaDraft.descripcion_dano}
+                        onChange={(e) => setNuevaLineaDraft((prev) => ({ ...prev, descripcion_dano: e.target.value }))}
+                        placeholder="Detalle de daño o especificación técnica..."
+                        rows={2}
+                        className="bg-secondary border-border mt-1"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setShowFormManual(false)} disabled={addingLineaManual}>
+                        Cancelar
+                      </Button>
+                      <Button onClick={agregarLineaManual} disabled={addingLineaManual} className="gap-2">
+                        <Save size={14} /> {addingLineaManual ? "Guardando..." : "Guardar Línea"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1525,6 +1774,7 @@ export default function OrdenDetalle() {
                         </td>
                       )}
                     </tr>
+
                     {editingLineaId === l.id && lineaDraft && (
                       <tr className="border-b border-border/50 bg-secondary/10">
                         <td colSpan={canEditOrders ? 9 : 8} className="px-4 py-4">
@@ -1563,6 +1813,7 @@ export default function OrdenDetalle() {
                                 </Select>
                               </div>
                             </div>
+
                             <div className="space-y-3">
                               <div className="flex flex-wrap gap-4">
                                 {[
@@ -1581,6 +1832,7 @@ export default function OrdenDetalle() {
                                   </label>
                                 ))}
                               </div>
+
                               <div>
                                 <label className="text-xs text-muted-foreground font-semibold uppercase">Descripción</label>
                                 <Textarea
@@ -1590,6 +1842,7 @@ export default function OrdenDetalle() {
                                   className="bg-secondary border-border mt-1"
                                 />
                               </div>
+
                               <div className="flex items-center justify-between gap-3 border border-border rounded-md px-3 py-2 bg-card/50">
                                 <div>
                                   <p className="text-xs uppercase text-muted-foreground font-semibold">Horas Totales</p>
@@ -1600,6 +1853,7 @@ export default function OrdenDetalle() {
                                   <p className="font-semibold text-primary">{formatColones((Number(lineaDraft.costo_pintura) || 0) + ((Number(lineaDraft.costo_repuesto) || 0) * Math.max(1, Number(lineaDraft.cantidad) || 1)), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                                 </div>
                               </div>
+
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <Button
                                   variant="destructive"
@@ -1625,10 +1879,12 @@ export default function OrdenDetalle() {
                     )}
                   </Fragment>
                 ))}
+
                 {lineasDanio.length === 0 && (
                   <tr><td colSpan={canEditOrders ? 9 : 8} className="py-12 text-center text-muted-foreground">No hay líneas de daño registradas</td></tr>
                 )}
               </tbody>
+
               {lineas.length > 0 && (
                 <tfoot>
                   <tr className="bg-secondary/30 border-t border-border">
@@ -1850,6 +2106,7 @@ export default function OrdenDetalle() {
                         </div>
                         <p className="text-xs text-muted-foreground">{linea.pieza_categoria || "Sin categoría"}</p>
                       </div>
+
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={`station-badge border text-xs ${
                           linea.tipo_repuesto === "Nuevo" ? "bg-orange-500/20 text-orange-400 border-orange-500/30"
@@ -1864,12 +2121,14 @@ export default function OrdenDetalle() {
                         </span>
                       </div>
                     </div>
+
                     <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-muted-foreground">
                       <span>D&M: {linea.flag_desarmado_montaje ? "Sí" : "No"}</span>
                       <span>Reparación: {linea.flag_reparacion ? "Sí" : "No"}</span>
                       <span>Pintura: {linea.flag_pintura ? "Sí" : "No"}</span>
                       <span>Repuesto: {linea.tipo_repuesto}</span>
                     </div>
+
                     <div className="mt-3 rounded-md bg-card/60 border border-border px-3 py-2 text-sm text-muted-foreground">
                       {linea.descripcion_dano || "Sin descripción técnica registrada."}
                     </div>

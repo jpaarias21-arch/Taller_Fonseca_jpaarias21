@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabaseClient";
 import jsPDF from "jspdf";
 
 /* ───────────────────────────────────────────────
-   PALETA DE COLORES INSTITUCIONALES
+   PALETA DE COLORES INSTITUCIONALES (TALLER FONSECA)
    ─────────────────────────────────────────────── */
 const AZUL = [26, 43, 76];        // #1A2B4C
 const AZUL_CLARO = [52, 73, 112]; // #344970
@@ -17,19 +17,13 @@ const NEGRO = [40, 40, 40];
 const BORDE_SUAVE = [210, 215, 220];
 
 /* ───────────────────────────────────────────────
-   LOGO BASE64 (CPF generado manualmente como vector)
-   Se usa texto estilizado en vez de imagen externa
+   UTILIDADES DE FORMATEO (SIN UNICODE / SIN SÍMBOLOS ROTOS)
    ─────────────────────────────────────────────── */
-
-const LOGO_BG = AZUL;        // fondo del logo
-const LOGO_TEXT = BLANCO;    // letras
-const LOGO_ACCENT = AMARILLO; // acento decorativo
-
-/* ───────────────────────────────────────────────
-   UTILIDADES DE FORMATEO
-   ─────────────────────────────────────────────── */
-const formatoMoneda = (v) =>
-  "₡" + Number(v || 0).toLocaleString("es-CR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+const formatoMoneda = (v) => {
+  const num = Number(v || 0);
+  const enteroFormateado = Math.round(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `CRC ${enteroFormateado}`;
+};
 
 const formatoFecha = (fecha) => {
   if (!fecha) return "—";
@@ -39,17 +33,6 @@ const formatoFecha = (fecha) => {
     year: "numeric",
     month: "long",
     day: "numeric",
-  });
-};
-
-const formatoFechaCorta = (fecha) => {
-  if (!fecha) return "—";
-  const d = new Date(fecha);
-  if (isNaN(d.getTime())) return String(fecha);
-  return d.toLocaleDateString("es-CR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
   });
 };
 
@@ -78,11 +61,15 @@ export async function generarReporteVehiculo(ordenActual) {
 
   const orden = ordenes[0];
 
-  // ── 2. Consultar líneas de avalúo ──
-  const { data: lineas } = await supabase
+  // ── 2. Consultar líneas de avalúo (TABLA ÚNICA: Repuestos y Mano de Obra) ──
+  const { data: lineas, error: errLineas } = await supabase
     .from("linea_avaluo")
     .select("*")
     .eq("orden_id", orden.id);
+
+  if (errLineas) {
+    console.error("Error al obtener las líneas del avalúo:", errLineas);
+  }
 
   const todasLineas = lineas || [];
 
@@ -97,52 +84,48 @@ export async function generarReporteVehiculo(ordenActual) {
     if (y + necesario > pageH - 25) {
       doc.addPage();
       y = M + 5;
-      // Dibujar header en páginas siguientes (versión compacta)
+      // Header compacto en páginas siguientes
       doc.setFillColor(...AZUL);
       doc.rect(0, 0, pageW, 8, "F");
       doc.setTextColor(...BLANCO);
       doc.setFontSize(6);
       doc.setFont("helvetica", "normal");
-      doc.text("Taller Mecánico Fonseca · Enderezado y Pintura · Tel: 2665-2046", pageW / 2, 5.5, { align: "center" });
+      doc.text("Taller Mecanico Fonseca - Enderezado y Pintura - Tel: 2665-2046", pageW / 2, 5.5, { align: "center" });
       doc.setFillColor(...AMARILLO);
       doc.rect(0, 8, pageW, 0.8, "F");
     }
   };
 
   /* =========================================================
-     ENCABEZADO INSTITUCIONAL
+     ENCABEZADO INSTITUCIONAL DEDICADO
      ========================================================= */
 
-  // ── Borde decorativo externo ──
+  // Borde decorativo externo continuo
   doc.setDrawColor(...BORDE_SUAVE);
   doc.setLineWidth(0.5);
   doc.rect(M, 10, pageW - M * 2, pageH - 25, "S");
 
-  // ── Bloque Logo (CPF) ──
-  doc.setFillColor(...LOGO_BG);
+  // Bloque Logo (CPF)
+  doc.setFillColor(...AZUL);
   doc.rect(M + 2, 14, 26, 18, "F");
-
-  // Línea decorativa amarilla dentro del logo
-  doc.setFillColor(...LOGO_ACCENT);
+  doc.setFillColor(...AMARILLO);
   doc.rect(M + 2, 14, 26, 2.5, "F");
-
-  doc.setTextColor(...LOGO_TEXT);
+  doc.setTextColor(...BLANCO);
   doc.setFontSize(13);
   doc.setFont("helvetica", "bold");
   doc.text("CPF", M + 15, 26, { align: "center" });
 
-  // ── Bloque nombre taller (fondo amarillo) ──
+  // Bloque nombre taller (fondo amarillo)
   doc.setFillColor(...AMARILLO);
   doc.rect(M + 28, 14, 75, 18, "F");
-
   doc.setTextColor(...AZUL);
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "bold");
-  doc.text("TALLER MECÁNICO", M + 32, 19.5);
+  doc.text("TALLER MECANICO", M + 32, 19.5);
   doc.setFontSize(16);
   doc.text("FONSECA", M + 32, 27.5);
 
-  // ── Barra roja (Enderezado y Pintura) ──
+  // Barra roja (Enderezado y Pintura)
   doc.setFillColor(...ROJO);
   doc.rect(M + 2, 32, 101, 6, "F");
   doc.setTextColor(...BLANCO);
@@ -150,7 +133,7 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.setFont("helvetica", "bold");
   doc.text("Enderezado y Pintura", M + 52.5, 36.3, { align: "center" });
 
-  // ── Datos del taller (lado derecho) ──
+  // Datos del taller (derecha)
   doc.setTextColor(...AZUL);
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
@@ -160,15 +143,15 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.setFontSize(7);
   doc.setFont("helvetica", "normal");
   const infoTaller = [
-    "Carrocería, Pintura y Mecánica General",
-    "50 m este de la entrada principal, Residencial Bosques Don José",
-    "Teléfonos: 2665-2046 / 2666-7444",
+    "Carroceria, Pintura y Mecanica General",
+    "50 m este de la entrada principal, Residencial Bosques Don Jose",
+    "Telefonos: 2665-2046 / 2666-7444",
   ];
   infoTaller.forEach((linea, i) => {
     doc.text(linea, pageW - M - 2, 21 + i * 3.8, { align: "right" });
   });
 
-  // ── Correo (en negrita y amarillo) ──
+  // Correo institucional
   doc.setTextColor(...AZUL);
   doc.setFont("helvetica", "bold");
   doc.text("E-mail:", pageW - M - 2, 33.2, { align: "right" });
@@ -180,7 +163,6 @@ export async function generarReporteVehiculo(ordenActual) {
      ========================================================= */
   y = 44;
 
-  // Barra decorativa izquierda (acento vertical)
   doc.setLineWidth(1.3);
   doc.setDrawColor(...AZUL);
   doc.line(M + 2, y, M + 2, y + 8);
@@ -188,25 +170,22 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.setTextColor(...AZUL);
   doc.setFontSize(13);
   doc.setFont("helvetica", "bold");
-  doc.text("PRESUPUESTO / COTIZACIÓN", M + 8, y + 4.8);
+  doc.text("PRESUPUESTO / COTIZACION", M + 8, y + 4.8);
 
-  // Número de orden
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...GRIS_TEXTO);
-  doc.text(`Orden N°: ${orden.numero_orden || orden.id.toString().slice(0, 8).toUpperCase()}`, M + 8, y + 9);
+  doc.text(`Orden N: ${orden.numero_orden || orden.id.toString().slice(0, 8).toUpperCase()}`, M + 8, y + 9);
 
-  // Fecha (derecha)
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...GRIS_TEXTO);
-  doc.text(`Fecha de emisión: ${formatoFecha(new Date())}`, pageW - M - 2, y + 4.8, { align: "right" });
+  doc.text(`Fecha de emision: ${formatoFecha(new Date())}`, pageW - M - 2, y + 4.8, { align: "right" });
 
-  // Vigencia
   doc.setFontSize(7);
   doc.setTextColor(...AMARILLO);
   doc.setFont("helvetica", "bold");
-  doc.text(`Vigencia: 15 días`, pageW - M - 2, y + 9, { align: "right" });
+  doc.text(`Vigencia: 15 dias`, pageW - M - 2, y + 9, { align: "right" });
 
   y += 14;
 
@@ -225,7 +204,6 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.setLineWidth(0.3);
   doc.roundedRect(M + 2, y, anchoTarjeta, altoTarjeta, 1.5, 1.5, "S");
 
-  // Título de tarjeta
   doc.setFillColor(...AZUL);
   doc.rect(M + 4, y + 1.5, 4, 9, "F");
   doc.setTextColor(...AZUL);
@@ -240,7 +218,7 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...GRIS_TEXTO);
   doc.text("Nombre:", M + 5, y + 12);
-  doc.text("Teléfono:", M + 5, y + 16.5);
+  doc.text("Telefono:", M + 5, y + 16.5);
 
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...NEGRO);
@@ -261,7 +239,7 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.setTextColor(...AZUL);
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "bold");
-  doc.text("VEHÍCULO", tarjetaDerX + 8, y + 5.5);
+  doc.text("VEHICULO", tarjetaDerX + 8, y + 5.5);
   doc.setLineWidth(0.2);
   doc.setDrawColor(...BORDE_SUAVE);
   doc.line(tarjetaDerX, y + 8, tarjetaDerX + anchoTarjeta, y + 8);
@@ -270,7 +248,7 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...GRIS_TEXTO);
   doc.text("Placa:", tarjetaDerX + 3, y + 12);
-  doc.text("Vehículo:", tarjetaDerX + 3, y + 16.5);
+  doc.text("Vehiculo:", tarjetaDerX + 3, y + 16.5);
 
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...NEGRO);
@@ -283,24 +261,24 @@ export async function generarReporteVehiculo(ordenActual) {
   y += altoTarjeta + 8;
 
   /* =========================================================
-     TABLA DE TRABAJOS Y REPUESTOS
+     TABLA OPTIMIZADA UNIFICADA DE TRABAJOS Y REPUESTOS
      ========================================================= */
   asegurarEspacio(24);
 
-  // ── Encabezado de la tabla ──
   const colXCant = M + 4;
   const colXDesc = M + 26;
   const colXPrecioU = pageW - M - 50;
   const colXSubtotal = pageW - M - 4;
   const anchoTabla = pageW - M * 2 - 4;
 
+  // Encabezado principal de la tabla
   doc.setFillColor(...AZUL);
   doc.roundedRect(M + 2, y, anchoTabla, 7.5, 1, 1, "F");
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...BLANCO);
   doc.setFontSize(7.5);
   doc.text("CANT.", colXCant, y + 5.2);
-  doc.text("DESCRIPCIÓN", colXDesc, y + 5.2);
+  doc.text("DESCRIPCION / CONCEPTO", colXDesc, y + 5.2);
   doc.text("PRECIO UNIT.", colXPrecioU + 10, y + 5.2, { align: "right" });
   doc.text("SUBTOTAL", colXSubtotal, y + 5.2, { align: "right" });
 
@@ -308,64 +286,61 @@ export async function generarReporteVehiculo(ordenActual) {
 
   let totalCotizado = 0;
 
-  // Clasificar líneas
-  const repuestos = [];
-  const manoObra = [];
-  todasLineas.forEach((l) => {
-    const esRepuesto = l.tipo === "repuesto" || l.es_repuesto;
-    if (esRepuesto) repuestos.push(l);
-    else manoObra.push(l);
-  });
-
-  /** Renderiza una sección de la tabla con título */
-  const renderSeccion = (titulo, items, iconChar = "▸") => {
-    if (items.length === 0) return;
-
-    asegurarEspacio(10);
-
-    // Sub-encabezado de sección
-    doc.setFillColor(...GRIS_CLARO);
-    doc.rect(M + 2, y, anchoTabla, 5, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(...AZUL);
-    doc.setFontSize(7.5);
-    doc.text(`${iconChar} ${titulo}`, M + 6, y + 3.6);
-    y += 5.5;
-
-    items.forEach((l, idx) => {
+  if (todasLineas.length === 0) {
+    asegurarEspacio(12);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(...GRIS_TEXTO);
+    doc.setFontSize(8);
+    doc.text("No hay repuestos o trabajos registrados en esta cotizacion.", M + 6, y + 4);
+    y += 10;
+  } else {
+    todasLineas.forEach((l, idx) => {
       asegurarEspacio(7);
 
-      // Alternancia de filas
+      // Sombreado alternado elegante (Zebra striping)
       if (idx % 2 === 1) {
         doc.setFillColor(...GRIS_FONDO);
         doc.rect(M + 2, y - 1, anchoTabla, 6.5, "F");
       }
 
-      const cantidad = Number(l.cantidad || 1);
-      const precioUnit = Number(l.precio || l.precio_unitario || 0);
-      const subtotal = Number(l.subtotal || cantidad * precioUnit || 0);
+      const cantidad = Math.max(1, Number(l.cantidad) || 1);
+      const costoRepuesto = Number(l.costo_repuesto) || 0;
+      const costoPintura = Number(l.costo_pintura) || 0;
+      const montoDirecto = Number(l.subtotal) || 0;
+
+      // Determinación precisa del subtotal
+      let subtotal = (costoRepuesto * cantidad) + costoPintura;
+      if (subtotal === 0 && montoDirecto > 0) {
+        subtotal = montoDirecto;
+      }
+
+      const precioUnit = cantidad > 0 ? (subtotal / cantidad) : subtotal;
+      const desc = String(l.pieza_nombre || l.concepto || l.descripcion_dano || "—").toUpperCase();
+
       totalCotizado += subtotal;
 
-      const desc = String(l.pieza_nombre || l.descripcion || "—").toUpperCase();
-
+      // Columna CANTIDAD
       doc.setFont("helvetica", "normal");
       doc.setTextColor(...NEGRO);
       doc.setFontSize(7.5);
-
       doc.text(String(cantidad), colXCant + 2, y + 3.5, { align: "center" });
+
+      // Columna DESCRIPCION
       doc.text(desc, colXDesc, y + 3.5);
 
+      // Columna PRECIO UNITARIO
       doc.setFont("helvetica", "normal");
       doc.setTextColor(...GRIS_TEXTO);
       doc.setFontSize(7);
       doc.text(formatoMoneda(precioUnit), colXPrecioU + 10, y + 3.5, { align: "right" });
 
+      // Columna SUBTOTAL
       doc.setFont("helvetica", "bold");
       doc.setTextColor(...AZUL);
       doc.setFontSize(7.5);
       doc.text(formatoMoneda(subtotal), colXSubtotal, y + 3.5, { align: "right" });
 
-      // Línea divisoria sutil
+      // Línea divisoria muy suave entre ítems
       doc.setDrawColor(240, 240, 240);
       doc.setLineWidth(0.2);
       doc.line(M + 2, y + 5.2, pageW - M - 2, y + 5.2);
@@ -373,31 +348,10 @@ export async function generarReporteVehiculo(ordenActual) {
       y += 6.5;
     });
 
-    // Línea final de sección
     doc.setDrawColor(...BORDE_SUAVE);
     doc.setLineWidth(0.3);
     doc.line(M + 2, y, pageW - M - 2, y);
     y += 3;
-  };
-
-  if (todasLineas.length === 0) {
-    asegurarEspacio(12);
-    doc.setFont("helvetica", "italic");
-    doc.setTextColor(...GRIS_TEXTO);
-    doc.setFontSize(8);
-    doc.text("No hay repuestos o trabajos registrados en esta cotización.", M + 6, y + 4);
-    y += 10;
-  } else {
-    renderSeccion("REPUESTOS", repuestos, "■");
-    renderSeccion("MANO DE OBRA", manoObra, "◆");
-  }
-
-  // Mano de obra directa desde la orden
-  const montoManoObraDirecta = Number(orden.mano_obra || orden.costo_mano_obra || 0);
-  if (montoManoObraDirecta > 0 && manoObra.length === 0) {
-    renderSeccion("MANO DE OBRA", [
-      { cantidad: 1, descripcion: "TRABAJOS VARIOS Y MANTENIMIENTO", subtotal: montoManoObraDirecta },
-    ]);
   }
 
   /* =========================================================
@@ -408,7 +362,7 @@ export async function generarReporteVehiculo(ordenActual) {
   const sumXLabel = pageW - M - 50;
   const sumXValue = pageW - M - 4;
 
-  // ── Subtotal ──
+  // Subtotal
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(...GRIS_TEXTO);
@@ -419,7 +373,7 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.text(formatoMoneda(totalCotizado), sumXValue, y, { align: "right" });
   y += 5.5;
 
-  // ── IVA ──
+  // IVA
   const montoIVA = orden.iva ? Number(orden.iva) : 0;
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...GRIS_TEXTO);
@@ -431,13 +385,13 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.text(formatoMoneda(montoIVA), sumXValue, y, { align: "right" });
   y += 6;
 
-  // ── Línea separadora ──
+  // Línea separadora
   doc.setDrawColor(...AZUL);
   doc.setLineWidth(0.5);
   doc.line(sumXLabel - 3, y, sumXValue, y);
   y += 3;
 
-  // ── GRAN TOTAL (recuadro) ──
+  // Box del Gran Total
   const granTotal = totalCotizado + montoIVA;
   doc.setFillColor(...GRIS_FONDO);
   doc.rect(sumXLabel - 8, y - 2, 62, 10, "F");
@@ -464,7 +418,6 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.setLineWidth(0.4);
   doc.roundedRect(M + 2, y, anchoTabla, 26, 2, 2, "D");
 
-  // Título con fondo
   doc.setFillColor(...AZUL);
   doc.roundedRect(M + 4, y + 2, 55, 5, 1, 1, "F");
   doc.setTextColor(...BLANCO);
@@ -472,15 +425,14 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.setFont("helvetica", "bold");
   doc.text("NOTAS IMPORTANTES", M + 6, y + 5.5);
 
-  // Contenido de notas
   doc.setTextColor(...GRIS_TEXTO);
   doc.setFontSize(6.5);
   doc.setFont("helvetica", "normal");
   const notas = [
     "1. Este documento constituye un presupuesto estimado de los trabajos y repuestos requeridos.",
-    "2. Los precios están sujetos a cambios sin previo aviso según disponibilidad del mercado.",
-    "3. Cualquier trabajo adicional no contemplado será cotizado y facturado por separado.",
-    "4. Válido por 15 días hábiles a partir de la fecha de emisión.",
+    "2. Los precios estan sujetos a cambios sin previo aviso segun disponibilidad del mercado.",
+    "3. Cualquier trabajo adicional no contemplado sera cotizado y facturado por separado.",
+    "4. Valido por 15 dias habiles a partir de la fecha de emision.",
   ];
   notas.forEach((n, i) => {
     doc.text(n, M + 6, y + 10 + i * 4);
@@ -489,11 +441,10 @@ export async function generarReporteVehiculo(ordenActual) {
   y += 30;
 
   /* =========================================================
-     FIRMAS
+     FIRMAS Y DATOS LEGALES
      ========================================================= */
   asegurarEspacio(24);
 
-  // ── Línea de firma del cliente ──
   doc.setDrawColor(...BORDE_SUAVE);
   doc.setLineWidth(0.4);
   doc.line(M + 5, y + 6, M + 65, y + 6);
@@ -502,26 +453,23 @@ export async function generarReporteVehiculo(ordenActual) {
   doc.setFontSize(7);
   doc.text("Firma del Cliente", M + 5, y + 10);
 
-  // ── Línea de firma del taller ──
   doc.line(pageW - M - 65, y + 6, pageW - M - 5, y + 6);
-  doc.text("Taller Mecánico Fonseca", pageW - M - 65, y + 10);
+  doc.text("Taller Mecanico Fonseca", pageW - M - 65, y + 10);
 
-  // ── Sello / Cédula ──
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...AZUL);
   doc.setFontSize(6.5);
-  doc.text("Céd. Jurídica: 3-002-456789", M + 5, y + 15);
-  doc.text("Céd. Física: 1-0512-0345", pageW - M - 65, y + 15);
+  doc.text("Ced. Juridica: 3-002-456789", M + 5, y + 15);
+  doc.text("Ced. Fisica: 1-0512-0345", pageW - M - 65, y + 15);
 
   y += 22;
 
   /* =========================================================
-     FOOTER INSTITUCIONAL
+     FOOTER INSTITUCIONAL REPETIBLE
      ========================================================= */
   const pageCount = doc.internal.pages.length - 1;
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    // Barra azul inferior
     doc.setFillColor(...AZUL);
     doc.rect(M + 2, pageH - 16, pageW - M * 2 - 4, 8, "F");
     doc.setFillColor(...AMARILLO);
@@ -530,20 +478,19 @@ export async function generarReporteVehiculo(ordenActual) {
     doc.setTextColor(...BLANCO);
     doc.setFontSize(6);
     doc.setFont("helvetica", "normal");
-    doc.text("Taller Mecánico Fonseca · Enderezado y Pintura · Tel: 2665-2046 / 2666-7444", pageW / 2, pageH - 12.2, { align: "center" });
+    doc.text("Taller Mecanico Fonseca - Enderezado y Pintura - Tel: 2665-2046 / 2666-7444", pageW / 2, pageH - 12.2, { align: "center" });
     doc.setFont("helvetica", "italic");
     doc.setFontSize(5.5);
-    doc.text("Email: jafonsecah@yahoo.es · 50 m este de la entrada principal, Residencial Bosques Don José", pageW / 2, pageH - 9, { align: "center" });
+    doc.text("Email: jafonsecah@yahoo.es - 50 m este de la entrada principal, Residencial Bosques Don Jose", pageW / 2, pageH - 9, { align: "center" });
 
-    // Número de página
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.5);
     doc.setTextColor(150, 150, 150);
-    const pagText = i > 1 ? `Página ${i} de ${pageCount}` : "";
+    const pagText = i > 1 ? `Pagina ${i} de ${pageCount}` : "";
     doc.text(pagText, pageW - M - 4, pageH - 6.5, { align: "right" });
   }
 
-  // ── Guardar PDF ──
+  // ── Guardar archivo PDF ──
   const nombreArchivo = `Cotizacion_${orden.placa || "Vehiculo"}_${(orden.numero_orden || orden.id).toString().slice(0, 8)}.pdf`;
   doc.save(nombreArchivo);
 }
