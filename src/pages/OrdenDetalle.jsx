@@ -15,7 +15,7 @@ import { useToast } from "@/components/ui/use-toast";
 import {
   ArrowLeft, Car, User, Shield, Phone, MapPin, Calendar,
   CheckCircle, Clock, AlertTriangle, Camera, ChevronRight,
-  Package, Wrench, DollarSign, FileText, History, Lock, Pencil, Save, X, Search, Trash2
+  Package, Wrench, DollarSign, FileText, History, Lock, Pencil, Save, X, Search, Trash2, Plus
 } from "lucide-react";
 import { useRole } from "@/lib/useRole";
 import { formatColones, formatDisplayDateTime } from "@/lib/utils";
@@ -102,10 +102,6 @@ const getLineaHoras = (linea) =>
   (Number(linea?.horas_dm) || 0) + (Number(linea?.horas_reparacion) || 0);
 const getLineaMontoCotizado = (linea) =>
   (Number(linea?.costo_pintura) || 0) + ((Number(linea?.costo_repuesto) || 0) * getLineaCantidad(linea));
-const getManoObraConcepto = (item) =>
-  String(item?.concepto || item?.descripcion || item?.nombre || item?.detalle || "").trim();
-const getManoObraMonto = (item) =>
-  Number(item?.monto ?? item?.total ?? item?.precio ?? 0) || 0;
 
 const getOptionalNumberDraftValue = (value) => {
   const num = Number(value);
@@ -131,55 +127,40 @@ export default function OrdenDetalle() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { canApproveQuote, canMoveKanban, canEditOrders } = useRole();
-
   const [orden, setOrden] = useState(null);
   const [lineas, setLineas] = useState([]);
-  const [manoObraItems, setManoObraItems] = useState([]);
   const [compras, setCompras] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Read initial tab from URL query param (?tab=avaluo etc.)
   const urlParams = new URLSearchParams(window.location.search);
   const initialTab = urlParams.get("tab") || "info";
   const [tab, setTab] = useState(initialTab);
-
   const [updatingEstado, setUpdatingEstado] = useState(false);
   const [fotosView, setFotosView] = useState([]);
   const [documentosInsView, setDocumentosInsView] = useState([]);
-
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [pendingWhatsappStatus, setPendingWhatsappStatus] = useState("");
   const [pendingWhatsappMessage, setPendingWhatsappMessage] = useState("");
   const [pendingKanbanHistorial, setPendingKanbanHistorial] = useState([]);
   const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
-
   const [uploadingDocumentoIns, setUploadingDocumentoIns] = useState(false);
   const [uploadingFoto, setUploadingFoto] = useState(false);
   const [editingFotos, setEditingFotos] = useState(false);
-
   const [piezasCatalogo, setPiezasCatalogo] = useState([]);
   const [piezaQuery, setPiezaQuery] = useState("");
   const [addingLinea, setAddingLinea] = useState(false);
 
-  // Estados para Ingreso Manual de Líneas
+  // Estados para Ingreso Manual/Opciones de Línea
   const [showFormManual, setShowFormManual] = useState(false);
   const [nuevaLineaDraft, setNuevaLineaDraft] = useState(INITIAL_NUEVA_LINEA);
   const [addingLineaManual, setAddingLineaManual] = useState(false);
-
   const [editingLineaId, setEditingLineaId] = useState(null);
   const [lineaDraft, setLineaDraft] = useState(null);
   const [savingLineaId, setSavingLineaId] = useState(null);
   const [deletingLineaId, setDeletingLineaId] = useState(null);
-
-  const [manoObraDraft, setManoObraDraft] = useState({ concepto: "", monto: "" });
-  const [addingManoObra, setAddingManoObra] = useState(false);
-  const [deletingManoObraId, setDeletingManoObraId] = useState(null);
-
   const [editingAvaluo, setEditingAvaluo] = useState(false);
   const [savingAvaluo, setSavingAvaluo] = useState(false);
   const [avaluoDraft, setAvaluoDraft] = useState(null);
-
-  const [exportingProforma, setExportingProforma] = useState(false);
   const [exportingCotizacion, setExportingCotizacion] = useState(false);
 
   const createAvaluoDraft = (data) => ({
@@ -203,10 +184,8 @@ export default function OrdenDetalle() {
     notas_internas: String(data?.notas_internas || ""),
   });
 
-  const calcularTotalCotizado = (lineasRows, manoObraRows) => {
-    const totalLineas = (lineasRows || []).reduce((sum, item) => sum + getLineaMontoCotizado(item), 0);
-    const totalManoObra = (manoObraRows || []).reduce((sum, item) => sum + getManoObraMonto(item), 0);
-    return totalLineas + totalManoObra;
+  const calcularTotalCotizado = (lineasRows) => {
+    return (lineasRows || []).reduce((sum, item) => sum + getLineaMontoCotizado(item), 0);
   };
 
   useEffect(() => {
@@ -217,43 +196,23 @@ export default function OrdenDetalle() {
         base44.entities.RequerimientoCompra.list("-created_date", 200).then(all => all.filter(r => r.orden_id === id)),
         base44.entities.PiezaCatalogo.list("nombre", 1000).catch(() => []),
       ]);
-
-      const { data: manoObraData } = await supabase
-        .from("mano_obra")
-        .select("*")
-        .eq("orden_id", id)
-        .order("created_at", { ascending: true });
-
       setOrden(ords[0] || null);
       setLineas(lins);
       setCompras(reqs);
       setPiezasCatalogo(piezas || []);
-      setManoObraItems(Array.isArray(manoObraData) ? manoObraData : []);
       setLoading(false);
     };
     load();
   }, [id]);
 
-  // Auto-sincronizar monto_cotizado al cargar la página
   useEffect(() => {
     if (loading || !orden || !lineas) return;
-    const totalCalculado = calcularTotalCotizado(lineas, manoObraItems);
+    const totalCalculado = calcularTotalCotizado(lineas);
     if (orden.monto_cotizado !== totalCalculado) {
       base44.entities.OrdenTrabajo.update(id, { monto_cotizado: totalCalculado }).catch(() => {});
       setOrden((prev) => ({ ...prev, monto_cotizado: totalCalculado }));
     }
-  }, [loading, orden?.id, lineas?.length, manoObraItems?.length]);
-
-  // Listen for exportar-proforma event triggered from Ordenes list
-  useEffect(() => {
-    const handler = () => {
-      if (tab === "avaluo" && !loading) {
-        exportarProformaPDF();
-      }
-    };
-    window.addEventListener("exportar-proforma", handler);
-    return () => window.removeEventListener("exportar-proforma", handler);
-  }, [tab, loading]);
+  }, [loading, orden?.id, lineas?.length]);
 
   useEffect(() => {
     if (!orden) return;
@@ -287,10 +246,8 @@ export default function OrdenDetalle() {
           return { id: `${i}-pub`, index: i, url: pub.data?.publicUrl || raw };
         })
       );
-
       if (!cancelled) setFotosView(resolved);
     };
-
     resolveFotos();
     return () => {
       cancelled = true;
@@ -312,24 +269,19 @@ export default function OrdenDetalle() {
           }
           const path = extractUploadsPath(raw);
           const fallbackName = getStoredFileName(raw, `Documento INS ${i + 1}`);
-
           if (!path) {
             return { id: `${i}-url`, url: raw, name: fallbackName };
           }
-
           const signed = await supabase.storage.from("uploads").createSignedUrl(path, 60 * 60 * 24 * 7);
           if (signed.data?.signedUrl) {
             return { id: `${i}-signed`, url: signed.data.signedUrl, name: fallbackName };
           }
-
           const pub = supabase.storage.from("uploads").getPublicUrl(path);
           return { id: `${i}-pub`, url: pub.data?.publicUrl || raw, name: fallbackName };
         })
       );
-
       if (!cancelled) setDocumentosInsView(resolved);
     };
-
     resolveDocumentosIns();
     return () => {
       cancelled = true;
@@ -340,7 +292,6 @@ export default function OrdenDetalle() {
     const files = Array.from(event.target.files || []);
     event.target.value = "";
     if (!files.length) return;
-
     setUploadingDocumentoIns(true);
     try {
       const uploaded = [];
@@ -353,19 +304,14 @@ export default function OrdenDetalle() {
           });
           continue;
         }
-
         const { file_url } = await base44.integrations.Core.UploadFile({ file });
         uploaded.push(file_url);
       }
-
       if (!uploaded.length) return;
-
       const documentosActuales = Array.isArray(orden?.documentos_ins) ? orden.documentos_ins : [];
       const documentosNuevos = [...documentosActuales, ...uploaded];
-
       await base44.entities.OrdenTrabajo.update(id, { documentos_ins: documentosNuevos });
       setOrden((prev) => ({ ...prev, documentos_ins: documentosNuevos }));
-
       toast({ title: "Documentación INS cargada", description: `${uploaded.length} PDF(s) agregados.` });
     } catch (error) {
       toast({
@@ -382,10 +328,8 @@ export default function OrdenDetalle() {
     try {
       const documentosActuales = Array.isArray(orden?.documentos_ins) ? orden.documentos_ins : [];
       const documentosNuevos = documentosActuales.filter((_, i) => i !== index);
-
       await base44.entities.OrdenTrabajo.update(id, { documentos_ins: documentosNuevos });
       setOrden((prev) => ({ ...prev, documentos_ins: documentosNuevos }));
-
       toast({ title: "Documento eliminado" });
     } catch (error) {
       toast({
@@ -400,7 +344,6 @@ export default function OrdenDetalle() {
     const files = Array.from(event.target.files || []);
     event.target.value = "";
     if (!files.length) return;
-
     setUploadingFoto(true);
     try {
       const uploaded = [];
@@ -413,19 +356,14 @@ export default function OrdenDetalle() {
           });
           continue;
         }
-
         const { file_url } = await base44.integrations.Core.UploadFile({ file });
         uploaded.push(file_url);
       }
-
       if (!uploaded.length) return;
-
       const fotosActuales = Array.isArray(orden?.fotos) ? orden.fotos : [];
       const fotosNuevas = [...fotosActuales, ...uploaded];
-
       await base44.entities.OrdenTrabajo.update(id, { fotos: fotosNuevas });
       setOrden((prev) => ({ ...prev, fotos: fotosNuevas }));
-
       toast({ title: "Fotos cargadas", description: `${uploaded.length} foto(s) agregadas.` });
     } catch (error) {
       toast({
@@ -442,10 +380,8 @@ export default function OrdenDetalle() {
     try {
       const fotosActuales = Array.isArray(orden?.fotos) ? orden.fotos : [];
       const fotosNuevas = fotosActuales.filter((_, i) => i !== index);
-
       await base44.entities.OrdenTrabajo.update(id, { fotos: fotosNuevas });
       setOrden((prev) => ({ ...prev, fotos: fotosNuevas }));
-
       toast({ title: "Foto eliminada" });
     } catch (error) {
       toast({
@@ -460,7 +396,6 @@ export default function OrdenDetalle() {
     setUpdatingEstado(true);
     const aprobado = nuevoEstado === "Aprobado" || nuevoEstado === "Autorizado por Seguro";
     await base44.entities.OrdenTrabajo.update(id, { estado_cotizacion: nuevoEstado });
-
     if (aprobado) {
       const lineasParaCompra = lineas.filter(l => l.tipo_repuesto === "Nuevo" || l.tipo_repuesto === "UTS");
       for (const linea of lineasParaCompra) {
@@ -480,7 +415,6 @@ export default function OrdenDetalle() {
       }
       toast({ title: "Cotización aprobada", description: `Se generaron ${lineasParaCompra.length} requerimientos de compra automáticamente.` });
     }
-
     setOrden(prev => ({ ...prev, estado_cotizacion: nuevoEstado }));
     setUpdatingEstado(false);
     const reqs = await base44.entities.RequerimientoCompra.filter({ orden_id: id });
@@ -489,7 +423,6 @@ export default function OrdenDetalle() {
 
   const handleEstadoKanban = async (nuevaEstacion) => {
     if (nuevaEstacion === orden.estado_kanban) return;
-
     const aprobado = orden.estado_cotizacion === "Aprobado" || orden.estado_cotizacion === "Autorizado por Seguro";
     if (OPERATIVE_STATIONS.includes(nuevaEstacion) && !aprobado) {
       toast({
@@ -499,7 +432,6 @@ export default function OrdenDetalle() {
       });
       return;
     }
-
     if (!normalizeWhatsAppPhone(orden?.cliente_telefono)) {
       toast({
         title: "Movimiento bloqueado",
@@ -508,13 +440,11 @@ export default function OrdenDetalle() {
       });
       return;
     }
-
     const historial = [...(orden.historial_kanban || []), {
       estacion: nuevaEstacion,
       fecha: new Date().toISOString(),
       tecnico: orden.tecnico_actual_nombre || "Sistema"
     }];
-
     setPendingWhatsappStatus(nuevaEstacion);
     setPendingWhatsappMessage(buildStatusWhatsAppMessage(orden, nuevaEstacion));
     setPendingKanbanHistorial(historial);
@@ -531,7 +461,6 @@ export default function OrdenDetalle() {
       });
       return;
     }
-
     if (!pendingWhatsappStatus) {
       toast({
         title: "No se pudo confirmar",
@@ -540,7 +469,6 @@ export default function OrdenDetalle() {
       });
       return;
     }
-
     try {
       setSendingWhatsapp(true);
       let updatedOrder = null;
@@ -552,14 +480,12 @@ export default function OrdenDetalle() {
           historial_kanban: pendingKanbanHistorial
         });
       }
-
       setOrden(prev => ({
         ...prev,
         ...updatedOrder,
         estado_kanban: pendingWhatsappStatus,
         historial_kanban: pendingKanbanHistorial
       }));
-
       try {
         await WhatsAppAPI.enviarEstatus({
           to: phone,
@@ -571,7 +497,6 @@ export default function OrdenDetalle() {
           placa: orden?.placa,
           cliente: orden?.cliente_nombre
         });
-
         toast({
           title: "Estatus actualizado",
           description: "El estado se actualizó y el cliente fue notificado automáticamente por WhatsApp."
@@ -583,7 +508,6 @@ export default function OrdenDetalle() {
           variant: "destructive"
         });
       }
-
       setStatusModalOpen(false);
       setPendingWhatsappStatus("");
       setPendingWhatsappMessage("");
@@ -615,7 +539,6 @@ export default function OrdenDetalle() {
 
   const saveLinea = async (linea) => {
     if (!lineaDraft) return;
-
     const payload = {
       cantidad: Math.max(1, Number(lineaDraft.cantidad) || 1),
       horas_dm: Number(lineaDraft.horas_dm) || 0,
@@ -628,7 +551,6 @@ export default function OrdenDetalle() {
       tipo_repuesto: lineaDraft.tipo_repuesto,
       descripcion_dano: String(lineaDraft.descripcion_dano || "").trim(),
     };
-
     if ((payload.tipo_repuesto === "Nuevo" || payload.tipo_repuesto === "UTS") && !payload.descripcion_dano) {
       toast({
         title: "Descripción técnica requerida",
@@ -637,24 +559,17 @@ export default function OrdenDetalle() {
       });
       return;
     }
-
     payload.subtotal = getLineaMontoCotizado(payload);
     setSavingLineaId(linea.id);
-
     try {
       await base44.entities.LineaAvaluo.update(linea.id, payload);
-
       const updatedLineas = lineas.map((current) => current.id === linea.id ? { ...current, ...payload } : current);
-      const montoCotizado = calcularTotalCotizado(updatedLineas, manoObraItems);
-
+      const montoCotizado = calcularTotalCotizado(updatedLineas);
       await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
-
       const compraExistente = compras.find((compra) => compra.linea_avaluo_id === linea.id);
       const requiereCompra = payload.tipo_repuesto === "Nuevo" || payload.tipo_repuesto === "UTS";
       const cotizacionAprobada = orden?.estado_cotizacion === "Aprobado" || orden?.estado_cotizacion === "Autorizado por Seguro";
-
       let updatedCompras = compras;
-
       if (compraExistente && requiereCompra) {
         const compraPayload = {
           pieza_nombre: linea.pieza_nombre,
@@ -665,12 +580,10 @@ export default function OrdenDetalle() {
         await base44.entities.RequerimientoCompra.update(compraExistente.id, compraPayload);
         updatedCompras = compras.map((compra) => compra.id === compraExistente.id ? { ...compra, ...compraPayload } : compra);
       }
-
       if (compraExistente && !requiereCompra) {
         await base44.entities.RequerimientoCompra.update(compraExistente.id, { estado: "Cancelado", cantidad: payload.cantidad });
         updatedCompras = compras.map((compra) => compra.id === compraExistente.id ? { ...compra, estado: "Cancelado", cantidad: payload.cantidad } : compra);
       }
-
       if (!compraExistente && requiereCompra && cotizacionAprobada) {
         const nuevaCompra = await base44.entities.RequerimientoCompra.create({
           orden_id: id,
@@ -684,17 +597,15 @@ export default function OrdenDetalle() {
         });
         updatedCompras = [...compras, nuevaCompra];
       }
-
       setLineas(updatedLineas);
       setCompras(updatedCompras);
       setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
       setEditingLineaId(null);
       setLineaDraft(null);
-
-      toast({ title: "Avaluó actualizado", description: "La línea de avaluó fue actualizada." });
+      toast({ title: "Avalúo actualizado", description: "La línea de avalúo fue actualizada." });
     } catch (error) {
       toast({
-        title: "No se pudo actualizar el avaluó",
+        title: "No se pudo actualizar el avalúo",
         description: error?.message || "Intente nuevamente.",
         variant: "destructive"
       });
@@ -705,33 +616,27 @@ export default function OrdenDetalle() {
 
   const deleteLinea = async (linea) => {
     if (!linea?.id) return;
-    const confirmed = window.confirm(`¿Eliminar la línea "${linea.pieza_nombre}" del avaluó?`);
+    const confirmed = window.confirm(`¿Eliminar la línea "${linea.pieza_nombre}" del avalúo?`);
     if (!confirmed) return;
-
     setDeletingLineaId(linea.id);
     try {
       const comprasAsociadas = compras.filter((compra) => compra.linea_avaluo_id === linea.id);
-
       await Promise.all([
         base44.entities.LineaAvaluo.delete(linea.id),
         ...comprasAsociadas.map((compra) => base44.entities.RequerimientoCompra.delete(compra.id)),
       ]);
-
       const updatedLineas = lineas.filter((current) => current.id !== linea.id);
       const updatedCompras = compras.filter((compra) => compra.linea_avaluo_id !== linea.id);
-      const montoCotizado = calcularTotalCotizado(updatedLineas, manoObraItems);
-
+      const montoCotizado = calcularTotalCotizado(updatedLineas);
       await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
-
       setLineas(updatedLineas);
       setCompras(updatedCompras);
       setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
       setEditingLineaId(null);
       setLineaDraft(null);
-
       toast({
         title: "Línea eliminada",
-        description: "La línea fue removida del avaluó correctamente."
+        description: "La línea fue removida del avalúo correctamente."
       });
     } catch (error) {
       toast({
@@ -744,72 +649,22 @@ export default function OrdenDetalle() {
     }
   };
 
-  const piezasFiltradas = useMemo(() => {
-    const q = normalizeText(piezaQuery);
-    if (!q) return [];
-    return piezasCatalogo
-      .filter((pieza) => {
-        const nombre = normalizeText(pieza?.nombre);
-        const codigo = normalizeText(pieza?.codigo);
-        const categoria = normalizeText(pieza?.categoria);
-        return nombre.includes(q) || codigo.includes(q) || categoria.includes(q);
-      })
-      .slice(0, 8);
-  }, [piezaQuery, piezasCatalogo]);
-
-  const agregarPiezaAvaluo = async (pieza) => {
-    if (!pieza?.id || addingLinea) return;
-
-    const yaExiste = lineas.some((linea) => linea.pieza_id === pieza.id);
-    if (yaExiste) {
+  // Función para desplegar opciones al clickear Agregar
+  const handleOpenAddOptions = () => {
+    const nombreEscrito = piezaQuery.trim();
+    if (!nombreEscrito) {
       toast({
-        title: "Pieza ya agregada",
-        description: "Esa pieza ya existe en el avaluó. Edítela desde la tabla.",
+        title: "Nombre requerido",
+        description: "Escriba primero el nombre del trabajo o pieza en la barra.",
+        variant: "destructive",
       });
       return;
     }
-
-    setAddingLinea(true);
-    try {
-      const payload = {
-        orden_id: id,
-        pieza_id: pieza.id,
-        pieza_nombre: pieza.nombre,
-        pieza_categoria: pieza.categoria,
-        cantidad: 1,
-        flag_desarmado_montaje: false,
-        flag_reparacion: false,
-        flag_pintura: false,
-        tipo_repuesto: "Ninguno",
-        descripcion_dano: "",
-        horas_dm: 0,
-        horas_reparacion: 0,
-        costo_pintura: 0,
-        costo_repuesto: 0,
-        subtotal: 0,
-        es_ampliacion: true,
-      };
-
-      const nuevaLinea = await base44.entities.LineaAvaluo.create(payload);
-      const updatedLineas = [...lineas, nuevaLinea];
-      const montoCotizado = calcularTotalCotizado(updatedLineas, manoObraItems);
-
-      await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
-
-      setLineas(updatedLineas);
-      setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
-      setPiezaQuery("");
-
-      toast({ title: "Pieza agregada", description: "La línea se agregó al avaluó." });
-    } catch (error) {
-      toast({
-        title: "No se pudo agregar la pieza",
-        description: error?.message || "Intente nuevamente.",
-        variant: "destructive"
-      });
-    } finally {
-      setAddingLinea(false);
-    }
+    setNuevaLineaDraft({
+      ...INITIAL_NUEVA_LINEA,
+      pieza_nombre: nombreEscrito,
+    });
+    setShowFormManual(true);
   };
 
   const agregarLineaManual = async () => {
@@ -822,7 +677,6 @@ export default function OrdenDetalle() {
       });
       return;
     }
-
     const payload = {
       orden_id: id,
       pieza_nombre: piezaNombre,
@@ -839,7 +693,6 @@ export default function OrdenDetalle() {
       descripcion_dano: String(nuevaLineaDraft.descripcion_dano || "").trim(),
       es_ampliacion: true,
     };
-
     if ((payload.tipo_repuesto === "Nuevo" || payload.tipo_repuesto === "UTS") && !payload.descripcion_dano) {
       toast({
         title: "Descripción técnica requerida",
@@ -848,23 +701,19 @@ export default function OrdenDetalle() {
       });
       return;
     }
-
     payload.subtotal = getLineaMontoCotizado(payload);
     setAddingLineaManual(true);
-
     try {
       const nuevaLinea = await base44.entities.LineaAvaluo.create(payload);
       const updatedLineas = [...lineas, nuevaLinea];
-      const montoCotizado = calcularTotalCotizado(updatedLineas, manoObraItems);
-
+      const montoCotizado = calcularTotalCotizado(updatedLineas);
       await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
-
       setLineas(updatedLineas);
       setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
       setNuevaLineaDraft(INITIAL_NUEVA_LINEA);
+      setPiezaQuery("");
       setShowFormManual(false);
-
-      toast({ title: "Línea agregada", description: "La línea manual fue insertada en el avaluó." });
+      toast({ title: "Línea agregada", description: "La línea fue insertada en el avalúo." });
     } catch (error) {
       toast({
         title: "No se pudo agregar la línea",
@@ -873,95 +722,6 @@ export default function OrdenDetalle() {
       });
     } finally {
       setAddingLineaManual(false);
-    }
-  };
-
-  const agregarManoObra = async () => {
-    const concepto = String(manoObraDraft.concepto || "").trim();
-    const monto = Number(String(manoObraDraft.monto || "").replace(/[^\d]/g, "")) || 0;
-
-    if (!concepto) {
-      toast({
-        title: "Concepto requerido",
-        description: "Ingrese un concepto para la mano de obra.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    if (monto <= 0) {
-      toast({
-        title: "Monto inválido",
-        description: "Ingrese un monto mayor a cero.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setAddingManoObra(true);
-    try {
-      const insertPayload = {
-        orden_id: id,
-        concepto,
-        monto,
-      };
-
-      const { data, error } = await supabase
-        .from("mano_obra")
-        .insert(insertPayload)
-        .select("*")
-        .single();
-
-      if (error) throw error;
-
-      const updatedManoObra = [...manoObraItems, data];
-      const montoCotizado = calcularTotalCotizado(lineas, updatedManoObra);
-
-      await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
-
-      setManoObraItems(updatedManoObra);
-      setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
-      setManoObraDraft({ concepto: "", monto: "" });
-
-      toast({ title: "Mano de obra agregada", description: "El rubro fue agregado al avaluó." });
-    } catch (error) {
-      toast({
-        title: "No se pudo agregar mano de obra",
-        description: error?.message || "Intente nuevamente.",
-        variant: "destructive"
-      });
-    } finally {
-      setAddingManoObra(false);
-    }
-  };
-
-  const deleteManoObra = async (item) => {
-    if (!item?.id) return;
-    const confirmed = window.confirm(`¿Eliminar el rubro de mano de obra "${getManoObraConcepto(item) || "sin concepto"}"?`);
-    if (!confirmed) return;
-
-    setDeletingManoObraId(item.id);
-    try {
-      const { error } = await supabase.from("mano_obra").delete().eq("id", item.id);
-      if (error) throw error;
-
-      const updatedManoObra = manoObraItems.filter((current) => current.id !== item.id);
-      const montoCotizado = calcularTotalCotizado(lineas, updatedManoObra);
-
-      await base44.entities.OrdenTrabajo.update(id, { monto_cotizado: montoCotizado });
-
-      setManoObraItems(updatedManoObra);
-      setOrden((prev) => ({ ...prev, monto_cotizado: montoCotizado }));
-
-      toast({ title: "Mano de obra eliminada", description: "El rubro fue eliminado." });
-    } catch (error) {
-      toast({
-        title: "No se pudo eliminar mano de obra",
-        description: error?.message || "Intente nuevamente.",
-        variant: "destructive"
-      });
-    } finally {
-      setDeletingManoObraId(null);
     }
   };
 
@@ -981,7 +741,6 @@ export default function OrdenDetalle() {
 
   const saveAvaluo = async () => {
     if (!avaluoDraft) return;
-
     const payload = {
       placa: String(avaluoDraft.placa || "").trim().toUpperCase(),
       marca: String(avaluoDraft.marca || "").trim(),
@@ -1002,15 +761,14 @@ export default function OrdenDetalle() {
       descripcion_danos: String(avaluoDraft.descripcion_danos || ""),
       notas_internas: String(avaluoDraft.notas_internas || ""),
     };
-
     setSavingAvaluo(true);
     try {
       await base44.entities.OrdenTrabajo.update(id, payload);
       setOrden((prev) => ({ ...prev, ...payload }));
       setEditingAvaluo(false);
       toast({
-        title: "Avaluó actualizado",
-        description: "Se guardaron los cambios generales del avaluó."
+        title: "Avalúo actualizado",
+        description: "Se guardaron los cambios generales del avalúo."
       });
     } catch (error) {
       toast({
@@ -1024,146 +782,9 @@ export default function OrdenDetalle() {
   };
 
   const lineasDanio = lineas;
-  const totalManoObra = manoObraItems.reduce((sum, item) => sum + getManoObraMonto(item), 0);
-  const totalCotizado = calcularTotalCotizado(lineas, manoObraItems);
+  const totalCotizado = calcularTotalCotizado(lineas);
   const totalHorasAvaluo = lineas.reduce((sum, l) => sum + getLineaHoras(l), 0);
   const lineasConRepuesto = lineas.filter((l) => l.tipo_repuesto === "Nuevo" || l.tipo_repuesto === "UTS");
-
-  const exportarProformaPDF = () => {
-    if (!orden) return;
-    setExportingProforma(true);
-    try {
-      const doc = new jsPDF({ unit: "pt", format: "a4" });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 40;
-      let y = margin;
-
-      const ensureSpace = (heightNeeded = 24) => {
-        if (y + heightNeeded <= pageHeight - margin) return;
-        doc.addPage();
-        y = margin;
-      };
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(18);
-      doc.text("PROFORMA", margin, y);
-      y += 22;
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.text(`Fecha: ${new Date().toLocaleDateString("es-CR")}`, margin, y);
-      doc.text(`Orden: ${orden.numero_orden || "N/A"}`, pageWidth - margin, y, { align: "right" });
-      y += 18;
-
-      doc.text(`Cliente: ${orden.cliente_nombre || "N/A"}`, margin, y);
-      y += 14;
-      doc.text(`Vehículo: ${orden.placa || ""} ${orden.marca || ""} ${orden.modelo || ""} ${orden.anio || ""}`.trim(), margin, y);
-      y += 22;
-
-      ensureSpace(28);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("Líneas de Avaluó", margin, y);
-      y += 14;
-      doc.setDrawColor(100);
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 14;
-
-      const colPieza = margin;
-      const colCant = margin + 250;
-      const colHoras = margin + 300;
-      const colRep = margin + 360;
-      const colSubtotal = pageWidth - margin;
-
-      doc.setFontSize(9);
-      doc.text("Pieza", colPieza, y);
-      doc.text("Cant.", colCant, y);
-      doc.text("Horas", colHoras, y);
-      doc.text("Repuesto", colRep, y);
-      doc.text("Subtotal", colSubtotal, y, { align: "right" });
-      y += 8;
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 12;
-
-      doc.setFont("helvetica", "normal");
-
-      lineasDanio.forEach((linea) => {
-        const pieza = String(linea.pieza_nombre || "Pieza");
-        const piezasTexto = doc.splitTextToSize(pieza, 220);
-        const rowHeight = Math.max(16, piezasTexto.length * 11 + 2);
-
-        ensureSpace(rowHeight + 6);
-
-        doc.text(piezasTexto, colPieza, y);
-        doc.text(String(getLineaCantidad(linea)), colCant, y);
-        doc.text(String(getLineaHoras(linea)), colHoras, y);
-        doc.text(String(linea.tipo_repuesto || "Ninguno"), colRep, y);
-        doc.text(
-          formatColones(getLineaMontoCotizado(linea), { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
-          colSubtotal,
-          y,
-          { align: "right" }
-        );
-
-        y += rowHeight;
-        doc.setDrawColor(60);
-        doc.line(margin, y - 4, pageWidth - margin, y - 4);
-        y += 6;
-      });
-
-      if (manoObraItems.length > 0) {
-        ensureSpace(30);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.text("Mano de Obra", margin, y);
-        y += 14;
-
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        manoObraItems.forEach((item) => {
-          ensureSpace(18);
-          const concepto = getManoObraConcepto(item) || "Mano de obra";
-          doc.text(concepto, margin, y);
-          doc.text(
-            formatColones(getManoObraMonto(item), { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
-            colSubtotal,
-            y,
-            { align: "right" }
-          );
-          y += 16;
-        });
-      }
-
-      ensureSpace(44);
-      y += 8;
-      doc.setDrawColor(100);
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 18;
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.text("TOTAL PROFORMA", margin, y);
-      doc.text(
-        formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
-        colSubtotal,
-        y,
-        { align: "right" }
-      );
-
-      const safeOrder = String(orden.numero_orden || orden.placa || "orden").replace(/[^a-zA-Z0-9-_]/g, "_");
-      doc.save(`Proforma-${safeOrder}.pdf`);
-      toast({ title: "Proforma exportada", description: "Se descargó el PDF correctamente." });
-    } catch (error) {
-      toast({
-        title: "No se pudo exportar la proforma",
-        description: error?.message || "Intente nuevamente.",
-        variant: "destructive"
-      });
-    } finally {
-      setExportingProforma(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -1184,7 +805,7 @@ export default function OrdenDetalle() {
 
   const TABS = [
     { id: "info", label: "Información", IconComp: Car },
-    { id: "avaluo", label: "Avaluó", IconComp: Wrench },
+    { id: "avaluo", label: "Avalúo", IconComp: Wrench },
     { id: "comparativa-ins", label: `Comparativa/INS (${orden.documentos_ins?.length || 0})`, IconComp: FileText },
     { id: "compras", label: `Compras (${compras.length})`, IconComp: Package },
     { id: "fotos", label: `Fotos (${orden.fotos?.length || 0})`, IconComp: Camera },
@@ -1263,7 +884,6 @@ export default function OrdenDetalle() {
             <p className="text-2xl font-heading font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
           </div>
         </div>
-
         {(orden.estado_cotizacion === "Borrador" || orden.estado_cotizacion === "Enviado") && (
           <div className="mt-3 flex items-center gap-2 text-yellow-400 text-xs bg-yellow-500/10 border border-yellow-500/20 rounded-md px-3 py-2">
             <AlertTriangle size={14} />
@@ -1314,7 +934,7 @@ export default function OrdenDetalle() {
             <div className="flex justify-end gap-2">
               {!editingAvaluo ? (
                 <Button onClick={startEditAvaluo} className="gap-2">
-                  <Pencil size={14} /> Editar avaluó
+                  <Pencil size={14} /> Editar avalúo
                 </Button>
               ) : (
                 <>
@@ -1331,7 +951,7 @@ export default function OrdenDetalle() {
 
           {editingAvaluo && avaluoDraft && (
             <div className="data-card space-y-4">
-              <h3 className="font-heading font-bold uppercase tracking-wide">Edición General del Avaluó</h3>
+              <h3 className="font-heading font-bold uppercase tracking-wide">Edición General del Avalúo</h3>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <Input value={avaluoDraft.placa} onChange={(e) => updateAvaluoDraft("placa", e.target.value)} placeholder="Placa" className="bg-secondary border-border" />
                 <Input value={avaluoDraft.marca} onChange={(e) => updateAvaluoDraft("marca", e.target.value)} placeholder="Marca" className="bg-secondary border-border" />
@@ -1424,7 +1044,6 @@ export default function OrdenDetalle() {
                   {orden.es_asegurado ? "Asegurado" : "Particular"}
                 </span>
               </div>
-
               {orden.es_asegurado && (
                 <>
                   {[["Aseguradora", orden.aseguradora], ["Monto Autorizado", orden.monto_autorizado_seguro ? formatColones(orden.monto_autorizado_seguro, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : null]].map(item => item[1] ? (
@@ -1450,13 +1069,12 @@ export default function OrdenDetalle() {
                   </div>
                 </>
               )}
-
               <div className="flex justify-between text-sm border-b border-border/40 pb-2">
                 <span className="text-muted-foreground">Adelanto</span>
                 <span className="font-medium text-green-400">{formatColones(orden.adelanto_dinero || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Total Horas Avaluó</span>
+                <span className="text-muted-foreground">Total Horas Avalúo</span>
                 <span className="font-bold">{totalHorasAvaluo}</span>
               </div>
               <div className="flex justify-between text-sm">
@@ -1479,19 +1097,11 @@ export default function OrdenDetalle() {
         </div>
       )}
 
-      {/* Tab: Avaluó */}
+      {/* Tab: Avalúo */}
       {tab === "avaluo" && (
         <div className="data-card p-0 overflow-hidden">
           <div className="border-b border-border p-4 bg-secondary/10 space-y-4">
             <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={exportarProformaPDF}
-                disabled={exportingProforma}
-                className="gap-2"
-              >
-                <FileText size={14} /> {exportingProforma ? "Exportando..." : "Exportar Proforma"}
-              </Button>
               <Button
                 variant="outline"
                 onClick={() => {
@@ -1508,61 +1118,38 @@ export default function OrdenDetalle() {
                 <FileText size={14} /> {exportingCotizacion ? "Generando..." : "Cotización"}
               </Button>
             </div>
-
             {canEditOrders && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs text-muted-foreground font-semibold uppercase">
-                    Agregar producto al avaluó
+                    Escribir y agregar línea al avalúo
                   </label>
+                </div>
+                {/* Barra de búsqueda con botón de Agregar al lado */}
+                <div className="flex gap-2 max-w-2xl">
+                  <div className="relative flex-1">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={piezaQuery}
+                      onChange={e => setPiezaQuery(e.target.value)}
+                      placeholder="Escriba el nombre del trabajo o pieza a agregar..."
+                      className="pl-9 bg-secondary border-border"
+                      disabled={addingLineaManual}
+                    />
+                  </div>
                   <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowFormManual(!showFormManual)}
-                    className="gap-2 text-xs"
+                    onClick={handleOpenAddOptions}
+                    disabled={!piezaQuery.trim()}
+                    className="gap-2"
                   >
-                    {showFormManual ? <X size={14} /> : <Pencil size={14} />}
-                    {showFormManual ? "Cerrar ingreso manual" : "Ingreso Manual / Personalizado"}
+                    <Plus size={16} /> Agregar
                   </Button>
                 </div>
 
-                {/* Buscador de Catálogo */}
-                <div className="relative max-w-2xl">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={piezaQuery}
-                    onChange={e => setPiezaQuery(e.target.value)}
-                    placeholder="Buscar pieza del catálogo por nombre, código o categoría..."
-                    className="pl-9 bg-secondary border-border"
-                    disabled={addingLinea || showFormManual}
-                  />
-
-                  {piezaQuery.trim() && !showFormManual && (
-                    <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-xl">
-                      {piezasFiltradas.length > 0 ? (
-                        piezasFiltradas.map((pieza) => (
-                          <button
-                            key={pieza.id}
-                            type="button"
-                            onClick={() => agregarPiezaAvaluo(pieza)}
-                            className="w-full border-b border-border/60 px-4 py-2.5 text-left hover:bg-secondary last:border-b-0"
-                            disabled={addingLinea}
-                          >
-                            <p className="text-sm font-medium text-foreground">{pieza.nombre}</p>
-                            <p className="text-xs text-muted-foreground">{pieza.categoria}{pieza.codigo ? ` • ${pieza.codigo}` : ""}</p>
-                          </button>
-                        ))
-                      ) : (
-                        <p className="px-4 py-3 text-sm text-muted-foreground">No se encontraron piezas con ese criterio.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Formulario de Entrada Manual Directa */}
+                {/* Opciones desplegadas: Costos, Horas y Demás */}
                 {showFormManual && (
                   <div className="p-4 rounded-lg border border-border bg-secondary/20 space-y-4 mt-3">
-                    <h4 className="font-heading font-bold text-sm uppercase tracking-wide">Nueva Línea Manual</h4>
+                    <h4 className="font-heading font-bold text-sm uppercase tracking-wide">Opciones de la Nueva Línea</h4>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="md:col-span-2">
                         <label className="text-xs text-muted-foreground font-semibold uppercase">Pieza / Trabajo</label>
@@ -1583,7 +1170,6 @@ export default function OrdenDetalle() {
                         />
                       </div>
                     </div>
-
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
                       <div>
                         <label className="text-xs text-muted-foreground font-semibold uppercase">Cantidad</label>
@@ -1651,7 +1237,6 @@ export default function OrdenDetalle() {
                         </Select>
                       </div>
                     </div>
-
                     <div className="flex flex-wrap gap-4">
                       {[
                         ["flag_desarmado_montaje", "D&M"],
@@ -1669,7 +1254,6 @@ export default function OrdenDetalle() {
                         </label>
                       ))}
                     </div>
-
                     <div>
                       <label className="text-xs text-muted-foreground font-semibold uppercase">Descripción / Observaciones</label>
                       <Textarea
@@ -1680,13 +1264,12 @@ export default function OrdenDetalle() {
                         className="bg-secondary border-border mt-1"
                       />
                     </div>
-
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" onClick={() => setShowFormManual(false)} disabled={addingLineaManual}>
                         Cancelar
                       </Button>
                       <Button onClick={agregarLineaManual} disabled={addingLineaManual} className="gap-2">
-                        <Save size={14} /> {addingLineaManual ? "Guardando..." : "Guardar Línea"}
+                        <Save size={14} /> {addingLineaManual ? "Guardando..." : "Confirmar y Guardar"}
                       </Button>
                     </div>
                   </div>
@@ -1774,7 +1357,6 @@ export default function OrdenDetalle() {
                         </td>
                       )}
                     </tr>
-
                     {editingLineaId === l.id && lineaDraft && (
                       <tr className="border-b border-border/50 bg-secondary/10">
                         <td colSpan={canEditOrders ? 9 : 8} className="px-4 py-4">
@@ -1813,7 +1395,6 @@ export default function OrdenDetalle() {
                                 </Select>
                               </div>
                             </div>
-
                             <div className="space-y-3">
                               <div className="flex flex-wrap gap-4">
                                 {[
@@ -1832,7 +1413,6 @@ export default function OrdenDetalle() {
                                   </label>
                                 ))}
                               </div>
-
                               <div>
                                 <label className="text-xs text-muted-foreground font-semibold uppercase">Descripción</label>
                                 <Textarea
@@ -1842,7 +1422,6 @@ export default function OrdenDetalle() {
                                   className="bg-secondary border-border mt-1"
                                 />
                               </div>
-
                               <div className="flex items-center justify-between gap-3 border border-border rounded-md px-3 py-2 bg-card/50">
                                 <div>
                                   <p className="text-xs uppercase text-muted-foreground font-semibold">Horas Totales</p>
@@ -1853,7 +1432,6 @@ export default function OrdenDetalle() {
                                   <p className="font-semibold text-primary">{formatColones((Number(lineaDraft.costo_pintura) || 0) + ((Number(lineaDraft.costo_repuesto) || 0) * Math.max(1, Number(lineaDraft.cantidad) || 1)), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                                 </div>
                               </div>
-
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <Button
                                   variant="destructive"
@@ -1879,12 +1457,10 @@ export default function OrdenDetalle() {
                     )}
                   </Fragment>
                 ))}
-
                 {lineasDanio.length === 0 && (
                   <tr><td colSpan={canEditOrders ? 9 : 8} className="py-12 text-center text-muted-foreground">No hay líneas de daño registradas</td></tr>
                 )}
               </tbody>
-
               {lineas.length > 0 && (
                 <tfoot>
                   <tr className="bg-secondary/30 border-t border-border">
@@ -1903,99 +1479,6 @@ export default function OrdenDetalle() {
               )}
             </table>
           </div>
-
-          <div className="border-t border-border p-4 space-y-4 bg-secondary/5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h4 className="font-heading font-bold uppercase tracking-wide text-sm">Mano de Obra</h4>
-                <p className="text-xs text-muted-foreground">Agregue rubros adicionales de mano de obra para sumarlos al total final del avaluó.</p>
-              </div>
-            </div>
-
-            {canEditOrders && (
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_auto] gap-2 items-end">
-                <div>
-                  <label className="text-xs text-muted-foreground font-semibold uppercase">Concepto</label>
-                  <Input
-                    value={manoObraDraft.concepto}
-                    onChange={(e) => setManoObraDraft((prev) => ({ ...prev, concepto: e.target.value }))}
-                    placeholder="Ej: Alineado de piezas"
-                    className="bg-secondary border-border mt-1"
-                    disabled={addingManoObra}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground font-semibold uppercase">Monto (CRC)</label>
-                  <Input
-                    value={manoObraDraft.monto}
-                    onChange={(e) => {
-                      const digits = e.target.value.replace(/[^\d]/g, "");
-                      const formatted = digits ? Number(digits).toLocaleString("es-CR") : "";
-                      setManoObraDraft((prev) => ({ ...prev, monto: formatted }));
-                    }}
-                    placeholder="0"
-                    className="bg-secondary border-border mt-1"
-                    inputMode="numeric"
-                    disabled={addingManoObra}
-                  />
-                </div>
-                <Button onClick={agregarManoObra} disabled={addingManoObra} className="gap-2">
-                  {addingManoObra ? "Agregando..." : "Agregar"}
-                </Button>
-              </div>
-            )}
-
-            <div className="rounded-lg border border-border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-secondary/30">
-                    <th className="text-left py-3 px-4 text-muted-foreground font-semibold text-xs uppercase">Concepto</th>
-                    <th className="text-right py-3 px-4 text-muted-foreground font-semibold text-xs uppercase">Monto</th>
-                    {canEditOrders && <th className="text-right py-3 px-4 text-muted-foreground font-semibold text-xs uppercase">Acciones</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {manoObraItems.map((item) => (
-                    <tr key={item.id} className="border-b border-border/50">
-                      <td className="py-3 px-4">{getManoObraConcepto(item) || "Mano de obra"}</td>
-                      <td className="py-3 px-4 text-right font-semibold text-primary">
-                        {formatColones(getManoObraMonto(item), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                      </td>
-                      {canEditOrders && (
-                        <td className="py-3 px-4 text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => deleteManoObra(item)}
-                            disabled={deletingManoObraId === item.id}
-                            className="gap-2 text-destructive hover:text-destructive"
-                          >
-                            <Trash2 size={14} /> {deletingManoObraId === item.id ? "Eliminando..." : "Eliminar"}
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                  {manoObraItems.length === 0 && (
-                    <tr>
-                      <td colSpan={canEditOrders ? 3 : 2} className="py-6 px-4 text-center text-muted-foreground">
-                        No hay rubros de mano de obra agregados.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-secondary/30 border-t border-border">
-                    <td className="py-3 px-4 text-right font-bold uppercase text-xs">Total Mano de Obra</td>
-                    <td className="py-3 px-4 text-right font-bold text-primary">
-                      {formatColones(totalManoObra, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                    </td>
-                    {canEditOrders && <td className="py-3 px-4" />}
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
         </div>
       )}
 
@@ -2008,7 +1491,7 @@ export default function OrdenDetalle() {
                 <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
                   <FileText size={16} className="text-primary" /> Documentación INS
                 </h3>
-                <p className="text-xs text-muted-foreground mt-1">Adjunta y abre aquí los PDFs enviados por INS para compararlos manualmente con el avaluó.</p>
+                <p className="text-xs text-muted-foreground mt-1">Adjunta y abre aquí los PDFs enviados por INS para compararlos manualmente con el avalúo.</p>
               </div>
               {canEditOrders && (
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border bg-secondary px-3 py-2 text-sm hover:border-primary transition-colors">
@@ -2025,7 +1508,6 @@ export default function OrdenDetalle() {
                 </label>
               )}
             </div>
-
             {documentosInsView.length > 0 ? (
               <div className="space-y-3">
                 {documentosInsView.map((doc, index) => (
@@ -2068,18 +1550,16 @@ export default function OrdenDetalle() {
               </div>
             )}
           </div>
-
           <div className="data-card space-y-4">
             <div>
               <h3 className="font-heading font-bold uppercase tracking-wide flex items-center gap-2">
-                <Wrench size={16} className="text-primary" /> Avaluó Manual
+                <Wrench size={16} className="text-primary" /> Avalúo Manual
               </h3>
               <p className="text-xs text-muted-foreground mt-1">Usa esta lista para contrastar las piezas registradas manualmente contra el PDF del INS.</p>
             </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-lg border border-border bg-secondary/30 p-3">
-                <p className="text-xs uppercase text-muted-foreground">Piezas Avaluó</p>
+                <p className="text-xs uppercase text-muted-foreground">Piezas Avalúo</p>
                 <p className="text-2xl font-heading font-bold text-primary">{lineas.length}</p>
               </div>
               <div className="rounded-lg border border-border bg-secondary/30 p-3">
@@ -2087,11 +1567,10 @@ export default function OrdenDetalle() {
                 <p className="text-2xl font-heading font-bold text-primary">{lineasConRepuesto.length}</p>
               </div>
               <div className="rounded-lg border border-border bg-secondary/30 p-3">
-                <p className="text-xs uppercase text-muted-foreground">Total Avaluó</p>
+                <p className="text-xs uppercase text-muted-foreground">Total Avalúo</p>
                 <p className="text-xl font-heading font-bold text-primary">{formatColones(totalCotizado, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
               </div>
             </div>
-
             {lineas.length > 0 ? (
               <div className="space-y-3">
                 {lineas.map((linea) => (
@@ -2106,7 +1585,6 @@ export default function OrdenDetalle() {
                         </div>
                         <p className="text-xs text-muted-foreground">{linea.pieza_categoria || "Sin categoría"}</p>
                       </div>
-
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={`station-badge border text-xs ${
                           linea.tipo_repuesto === "Nuevo" ? "bg-orange-500/20 text-orange-400 border-orange-500/30"
@@ -2121,14 +1599,12 @@ export default function OrdenDetalle() {
                         </span>
                       </div>
                     </div>
-
                     <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-muted-foreground">
                       <span>D&M: {linea.flag_desarmado_montaje ? "Sí" : "No"}</span>
                       <span>Reparación: {linea.flag_reparacion ? "Sí" : "No"}</span>
                       <span>Pintura: {linea.flag_pintura ? "Sí" : "No"}</span>
                       <span>Repuesto: {linea.tipo_repuesto}</span>
                     </div>
-
                     <div className="mt-3 rounded-md bg-card/60 border border-border px-3 py-2 text-sm text-muted-foreground">
                       {linea.descripcion_dano || "Sin descripción técnica registrada."}
                     </div>
@@ -2137,7 +1613,7 @@ export default function OrdenDetalle() {
               </div>
             ) : (
               <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
-                No hay líneas de avaluó cargadas para comparar.
+                No hay líneas de avalúo cargadas para comparar.
               </div>
             )}
           </div>
@@ -2214,7 +1690,6 @@ export default function OrdenDetalle() {
               )}
             </div>
           )}
-
           {fotosView.filter((f) => !!f.url).length > 0 ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
               {fotosView.filter((f) => !!f.url).map((foto, i) => (
@@ -2241,7 +1716,6 @@ export default function OrdenDetalle() {
               <p>No hay fotos registradas para esta orden</p>
             </div>
           )}
-
           {fotosView.some((f) => !f.url) && (
             <p className="text-xs text-yellow-400 mt-3">
               Algunas fotos antiguas no se pueden mostrar porque fueron guardadas con URL temporal (blob).
