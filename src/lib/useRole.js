@@ -28,9 +28,9 @@ const ROLE_ALIASES = {
   manager: "gerente",
   empleado: "empleado",
   tecnico: "empleado",
-  user: "user",
-  usuario: "user",
-  secretaria: "user",
+  user: "admin",       // <-- Secretaria/user ahora apunta internamente a admin
+  usuario: "admin",    // <-- Secretaria/usuario apunta internamente a admin
+  secretaria: "admin", // <-- Secretaria apunta internamente a admin
 };
 
 /** @param {unknown} rawRole */
@@ -63,13 +63,13 @@ export function useRole() {
     isEmpleado,
     isSecretaria: !isAdmin && !isGerente && !isEmpleado,
     // Permisos específicos
-    canEditPrices: isAdmin,           // Solo dueño modifica precios
-    canApproveQuote: isAdmin,         // Solo dueño aprueba cotizaciones
+    canEditPrices: isAdmin,          // Solo dueño modifica precios
+    canApproveQuote: isAdmin,        // Solo dueño aprueba cotizaciones
     canManageInventory: isAdmin || isGerente,  // Dueño y gerente
     canManageCatalog: isAdmin || isGerente,    // Dueño y gerente
-    canCreateOrder: true,                       // Todos pueden crear órdenes
+    canCreateOrder: true,                      // Todos pueden crear órdenes
     canMoveKanban: isAdmin || isGerente,       // Dueño y gerente
-    canViewOrders: true,                        // Todos pueden ver órdenes y estado
+    canViewOrders: true,                       // Todos pueden ver órdenes y estado
     canEditOrders: !isEmpleado,                // Empleado no puede modificar nada existente
   };
 }
